@@ -1,0 +1,8 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/scan"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps(scan):"

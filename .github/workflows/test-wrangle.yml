@@ -1,0 +1,43 @@
+name: Test Wrangle
+
+on:
+  workflow_dispatch:
+    inputs:
+      wrangle_ref:
+        description: "wrangle ref to test (SHA, branch, or tag)"
+        required: true
+        type: string
+      correlation_id:
+        description: "Opaque ID for the dispatching workflow to locate this run"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: test-${{ inputs.wrangle_ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-shell:
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@${{ inputs.wrangle_ref }}
+    with:
+      scan-path: shell
+
+  test-container:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@${{ inputs.wrangle_ref }}
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-staging
+      registry: ghcr.io
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  test-scan:
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@${{ inputs.wrangle_ref }}
+    with:
+      tools: "osv zizmor scorecard:info"
