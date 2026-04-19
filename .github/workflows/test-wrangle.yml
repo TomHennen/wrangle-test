@@ -1,21 +1,30 @@
 name: Test Wrangle
 
+# Triggered by wrangle's integration-test.yml via workflow_dispatch.
+# The wrangle_ref is also mirrored into the repo variable WRANGLE_REF,
+# which is what the uses: refs below resolve against — GitHub does not
+# allow ${{ inputs.* }} in uses: refs, but ${{ vars.* }} is supported.
+
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       wrangle_ref:
-        description: "wrangle ref to test (SHA, branch, or tag)"
+        description: "wrangle ref to test (SHA, branch, or tag). Must match vars.WRANGLE_REF set by the dispatcher."
         required: true
         type: string
       correlation_id:
-        description: "Opaque ID (unused here, passed through for dispatch correlation)"
+        description: "Opaque ID for the dispatching workflow to locate this run"
         required: false
         type: string
         default: ""
 
+concurrency:
+  group: test-wrangle
+  cancel-in-progress: true
+
 jobs:
   test-shell:
-    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@${{ inputs.wrangle_ref }}
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@${{ vars.WRANGLE_REF }}
     with:
       scan-path: shell
 
@@ -25,7 +34,7 @@ jobs:
       packages: write
       id-token: write
       actions: read
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@${{ inputs.wrangle_ref }}
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@${{ vars.WRANGLE_REF }}
     with:
       path: container
       imagename: ghcr.io/tomhennen/wrangle-test-staging
@@ -34,6 +43,6 @@ jobs:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
   test-scan:
-    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@${{ inputs.wrangle_ref }}
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@${{ vars.WRANGLE_REF }}
     with:
       tools: "osv zizmor scorecard:info"
