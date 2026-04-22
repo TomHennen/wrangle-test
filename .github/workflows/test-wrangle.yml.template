@@ -38,4 +38,6 @@ jobs:
       security-events: write
     uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@__WRANGLE_SHA__
     with:
-      tools: "osv zizmor scorecard:info"
+      # Scorecard requires the default branch; integration/* branches can't use it.
+      # See: https://github.com/ossf/scorecard-action#workflow-restrictions
+      tools: "osv zizmor"
