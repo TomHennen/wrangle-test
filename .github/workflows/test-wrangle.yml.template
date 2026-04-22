@@ -11,6 +11,8 @@ on:
 
 jobs:
   test-shell:
+    permissions:
+      contents: read
     uses: TomHennen/wrangle/.github/workflows/build_shell.yml@__WRANGLE_SHA__
     with:
       scan-path: shell
@@ -30,6 +32,10 @@ jobs:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
   test-scan:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
     uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@__WRANGLE_SHA__
     with:
       tools: "osv zizmor scorecard:info"
