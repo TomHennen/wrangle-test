@@ -14,10 +14,12 @@ A companion repo containing minimal fixture projects — one per wrangle
 build type — used to integration-test wrangle's reusable workflows on
 real GitHub Actions infrastructure.
 
-Wrangle's CI dispatches this repo's `test-wrangle.yml` workflow on every
-internal PR, passing the PR's head SHA. Each job invokes the
-corresponding wrangle reusable workflow at that SHA, exercising the full
-adopter-facing contract.
+Wrangle's CI pushes an ephemeral `integration/*` branch to this repo on
+every internal PR, carrying a generated `test-wrangle.yml` with wrangle
+pinned at the PR's head SHA. Each job invokes the corresponding wrangle
+reusable workflow at that SHA, exercising the full adopter-facing contract.
+Ephemeral branches are cleaned up by the dispatch script and a janitor
+workflow (`cleanup-integration.yml`).
 
 See [test/integration/SPEC.md](https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md)
 in the wrangle repo for the full specification.

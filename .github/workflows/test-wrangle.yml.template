@@ -1,0 +1,35 @@
+name: Test Wrangle
+
+# Generated per wrangle PR by the dispatch script, which substitutes
+# __WRANGLE_SHA__ with the PR's head SHA. This file is a template —
+# the .template suffix prevents GitHub Actions from discovering it.
+# See: https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md
+
+on:
+  push:
+    branches: ["integration/**"]
+
+jobs:
+  test-shell:
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@__WRANGLE_SHA__
+    with:
+      scan-path: shell
+
+  test-container:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-staging
+      registry: ghcr.io
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  test-scan:
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@__WRANGLE_SHA__
+    with:
+      tools: "osv zizmor scorecard:info"
