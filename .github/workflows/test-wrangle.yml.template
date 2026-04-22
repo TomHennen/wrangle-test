@@ -28,6 +28,10 @@ jobs:
       path: container
       imagename: ghcr.io/tomhennen/wrangle-test-staging
       registry: ghcr.io
+      # The SLSA generator sometimes misdetects public repos as private
+      # when workflows run on branches pushed by PATs. This is safe —
+      # wrangle-test is intentionally public and disposable.
+      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
