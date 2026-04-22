@@ -8,7 +8,9 @@ permissions:
 
 jobs:
   automerge:
-    if: github.actor == 'dependabot[bot]'
+    # Use pull_request.user.login (not github.actor) to prevent actor spoofing.
+    # See: zizmor/bot-conditions
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Approve and auto-merge
