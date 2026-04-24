@@ -37,9 +37,9 @@ jobs:
 
   test-python:
     permissions:
-      contents: read
-      id-token: write
-      actions: read
+      contents: write     # provenance job uploads to release assets
+      id-token: write     # OIDC for Trusted Publishing + SLSA provenance
+      actions: read       # SLSA provenance generator
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
