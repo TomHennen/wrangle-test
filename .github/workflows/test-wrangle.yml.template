@@ -37,15 +37,13 @@ jobs:
 
   test-python:
     permissions:
-      contents: write     # provenance job uploads to release assets
-      id-token: write     # OIDC for Trusted Publishing + SLSA provenance
-      actions: read       # SLSA provenance generator
+      contents: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
-      repository-url: "https://test.pypi.org/legacy/"
-      # Tests run by default; publish only on non-PR events (which for
-      # integration tests means the push to integration/* branches).
+      # Build + test only. Publishing is not tested here because PyPI
+      # Trusted Publishing does not support reusable workflows.
+      # See: https://github.com/pypi/warehouse/issues/11096
 
   test-scan:
     permissions:
