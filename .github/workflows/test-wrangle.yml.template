@@ -35,6 +35,18 @@ jobs:
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
+  test-python:
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
+    with:
+      path: python
+      repository-url: "https://test.pypi.org/legacy/"
+      # Tests run by default; publish only on non-PR events (which for
+      # integration tests means the push to integration/* branches).
+
   test-scan:
     permissions:
       actions: read
