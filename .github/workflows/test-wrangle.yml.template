@@ -35,15 +35,52 @@ jobs:
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Patch the Python fixture version to be unique per run so every
+  # integration test exercises the full publish-to-TestPyPI path.
+  prep-python:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set unique test version
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sed -i "s/version = .*/version = \"0.0.1.dev${RUN_ID}\"/" python/pyproject.toml
+          git config user.name "wrangle-integration"
+          git config user.email "wrangle-integration@noreply"
+          git add python/pyproject.toml
+          git commit -m "Set test version 0.0.1.dev${RUN_ID}"
+          git push
+
   test-python:
+    needs: [prep-python]
     permissions:
       contents: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
-      # Build + test only. Publishing is not tested here because PyPI
-      # Trusted Publishing does not support reusable workflows.
-      # See: https://github.com/pypi/warehouse/issues/11096
+
+  # Publish to TestPyPI directly (not via reusable workflow) because
+  # PyPI Trusted Publishing requires the OIDC token from this workflow.
+  # See: https://github.com/pypi/warehouse/issues/11096
+  publish-python:
+    needs: [test-python]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: python-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          attestations: true
+          packages-dir: dist/
+          repository-url: "https://test.pypi.org/legacy/"
 
   test-scan:
     permissions:
