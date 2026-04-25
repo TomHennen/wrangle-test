@@ -59,6 +59,9 @@ jobs:
     needs: [prep-python]
     permissions:
       contents: read
+      # Required by wrangle's provenance job (calls slsa-github-generator):
+      id-token: write
+      actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
@@ -71,6 +74,9 @@ jobs:
   test-python-uv:
     permissions:
       contents: read
+      # Required by wrangle's provenance job (calls slsa-github-generator):
+      id-token: write
+      actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python-uv
