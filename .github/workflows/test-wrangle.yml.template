@@ -63,6 +63,18 @@ jobs:
     with:
       path: python
 
+  # Exercise the uv path of wrangle's python build (uv.lock present →
+  # uv sync / uv build / uv run pytest). This fixture is build-only: it
+  # validates that wrangle's reusable workflow handles uv-managed projects
+  # end-to-end (build + test + SBOM + SLSA provenance) without going
+  # through the publish path, which is already covered by test-python.
+  test-python-uv:
+    permissions:
+      contents: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
+    with:
+      path: python-uv
+
   # Publish to TestPyPI directly (not via reusable workflow) because
   # PyPI Trusted Publishing requires the OIDC token from this workflow.
   # See: https://github.com/pypi/warehouse/issues/11096
