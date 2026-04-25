@@ -1,0 +1,12 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wrangle-test-uv-fixture"
+version = "0.0.1"
+description = "uv-managed disposable test fixture for wrangle integration tests"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest"]
