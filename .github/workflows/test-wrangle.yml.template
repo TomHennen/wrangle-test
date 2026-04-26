@@ -58,8 +58,11 @@ jobs:
   test-python:
     needs: [prep-python]
     permissions:
-      contents: read
-      # Required by wrangle's provenance job (calls slsa-github-generator):
+      # Required by wrangle's provenance job (calls slsa-github-generator).
+      # `contents: write` is mandated by the generator's upload-assets job
+      # at startup even when upload-assets is false; matches the SLSA
+      # reference example.
+      contents: write
       id-token: write
       actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
@@ -73,8 +76,11 @@ jobs:
   # through the publish path, which is already covered by test-python.
   test-python-uv:
     permissions:
-      contents: read
-      # Required by wrangle's provenance job (calls slsa-github-generator):
+      # Required by wrangle's provenance job (calls slsa-github-generator).
+      # `contents: write` is mandated by the generator's upload-assets job
+      # at startup even when upload-assets is false; matches the SLSA
+      # reference example.
+      contents: write
       id-token: write
       actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
