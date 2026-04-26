@@ -17,6 +17,7 @@ jobs:
     with:
       scan-path: shell
 
+  # Container fixture — exercises the default (verify-image: true) path.
   test-container:
     permissions:
       contents: read
@@ -28,10 +29,32 @@ jobs:
       path: container
       imagename: ghcr.io/tomhennen/wrangle-test-staging
       registry: ghcr.io
+      release-events: non-pull-request   # explicit; matches the default
       # The SLSA generator sometimes misdetects public repos as private
       # when workflows run on branches pushed by PATs. This is safe —
       # wrangle-test is intentionally public and disposable.
       publish_provenance_for_private_repo: true
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Container opt-out fixture — exercises verify-image: false. Same
+  # composite, same provenance generation; only wrangle's verify step
+  # is skipped. Catches regressions where the workflow incorrectly
+  # gates something other than the verify job on this input.
+  test-container-no-verify:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-staging-no-verify
+      registry: ghcr.io
+      release-events: non-pull-request
+      publish_provenance_for_private_repo: true
+      verify-image: false
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -55,6 +78,8 @@ jobs:
           git commit -m "Set test version 0.0.1.dev${RUN_ID}"
           git push
 
+  # Python fixture — exercises the default (verify-provenance: true)
+  # path AND the publish-to-TestPyPI path.
   test-python:
     needs: [prep-python]
     permissions:
@@ -68,29 +93,33 @@ jobs:
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
+      release-events: non-pull-request   # explicit; matches the default
 
-  # Exercise the uv path of wrangle's python build (uv.lock present →
-  # uv sync / uv build / uv run pytest). This fixture is build-only: it
-  # validates that wrangle's reusable workflow handles uv-managed projects
-  # end-to-end (build + test + SBOM + SLSA provenance) without going
-  # through the publish path, which is already covered by test-python.
+  # Python opt-out fixture — exercises the uv path AND verify-provenance: false.
+  # Doubles up coverage: catches regressions in the uv tooling branch and in
+  # the verify-opt-out branch in one fixture instead of running two builds.
+  # Build-only (no publish) since publish coverage is in test-python.
   test-python-uv:
     permissions:
-      # Required by wrangle's provenance job (calls slsa-github-generator).
-      # `contents: write` is mandated by the generator's upload-assets job
-      # at startup even when upload-assets is false; matches the SLSA
-      # reference example.
       contents: write
       id-token: write
       actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python-uv
+      release-events: non-pull-request
+      verify-provenance: false
 
   # Publish to TestPyPI directly (not via reusable workflow) because
   # PyPI Trusted Publishing requires the OIDC token from this workflow.
   # See: https://github.com/pypi/warehouse/issues/11096
   publish-python:
+    # Mirror the canonical adopter pattern: gate publish on should-release
+    # so wrangle's release-events input controls both wrangle's internal
+    # gating and this publish job. With release-events: non-pull-request,
+    # publish runs on integration/** push events (which is what dispatch
+    # uses) but would not run on PRs.
+    if: ${{ needs.test-python.outputs.should-release == 'true' }}
     needs: [test-python]
     runs-on: ubuntu-latest
     permissions:
