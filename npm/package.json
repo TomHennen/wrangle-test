@@ -1,0 +1,13 @@
+{
+  "name": "@tomhennen/wrangle-integration-fixture",
+  "version": "0.0.1",
+  "description": "Disposable test fixture for wrangle's npm integration tests. Do not depend on this package.",
+  "license": "MIT",
+  "main": "index.js",
+  "files": [
+    "index.js"
+  ],
+  "dependencies": {
+    "ms": "^2.1.3"
+  }
+}

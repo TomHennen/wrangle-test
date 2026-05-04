@@ -138,6 +138,29 @@ jobs:
           packages-dir: dist/
           repository-url: "https://test.pypi.org/legacy/"
 
+  # npm fixture — exercises the default (verify-provenance: true) path
+  # through wrangle's reusable workflow: build → SBOM → hash → gate →
+  # provenance → verify. Publish is intentionally NOT wired up: npm
+  # Trusted Publishing cannot mint a package's first version
+  # (npm/cli#8544) and the trusted publisher must be registered on
+  # npmjs.com (package → Settings → Trusted publishing) before the
+  # OIDC handshake will succeed. Both are human-only bootstrap steps.
+  # Once the bootstrap publish has happened, add a publish job mirroring
+  # gh_workflow_examples/build_npm.yml.
+  test-npm:
+    permissions:
+      # Required by wrangle's nested provenance job (slsa-github-generator).
+      # `contents: write` is mandated by the generator's upload-assets job
+      # at startup even when upload-assets is false; matches the example
+      # in gh_workflow_examples/build_npm.yml.
+      contents: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
+    with:
+      path: npm
+      release-events: non-pull-request   # explicit; matches the default
+
   test-scan:
     permissions:
       actions: read
