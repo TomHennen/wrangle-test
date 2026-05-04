@@ -1,1 +1,1 @@
-module.exports = 'wrangle integration fixture';
+module.exports = require('ms');
