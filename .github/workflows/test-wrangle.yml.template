@@ -222,13 +222,16 @@ jobs:
       id-token: write   # OIDC for Trusted Publishing
       contents: read
     steps:
-      # Do NOT add registry-url to setup-node. It sets NODE_AUTH_TOKEN
-      # to GITHUB_TOKEN by default, causing npm to skip the OIDC exchange
-      # needed for Trusted Publishing. Without it, npm handles OIDC auth
-      # internally when --provenance is passed with id-token: write.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # npm Trusted Publishing (OIDC auth) requires npm >= 11.5.1.
+      # Node 22 ships npm 10.x which only supports --provenance for
+      # signing, not OIDC-based auth. Upgrade npm in-place.
+      - name: Upgrade npm for Trusted Publishing support
+        run: npm install -g npm@latest
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -239,11 +242,16 @@ jobs:
           path: dist/
 
       - name: Publish to npmjs.org with provenance
+        env:
+          # Unset NODE_AUTH_TOKEN so npm uses Trusted Publishing (OIDC)
+          # instead of the GITHUB_TOKEN that setup-node exports by default.
+          # With npm 11.5.1+, OIDC auth is attempted first when id-token:
+          # write is available and no auth token is configured.
+          NODE_AUTH_TOKEN: ""
         run: |
           set -euo pipefail
-          # Locate the tarball dynamically rather than relying on a fixed
-          # path — robust against download-artifact layout variations
-          # across major versions.
+          # Locate the tarball dynamically — robust against download-artifact
+          # layout variations across major versions.
           tgz="$(find dist -name '*.tgz' -print -quit)"
           if [[ -z "$tgz" ]]; then
             echo "::error::No .tgz found in dist/"
