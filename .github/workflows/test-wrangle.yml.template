@@ -225,7 +225,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
+          # Do NOT use registry-url here. setup-node's registry-url sets
+          # NODE_AUTH_TOKEN=${{ github.token }} by default, which causes
+          # npm to skip the OIDC exchange for Trusted Publishing and use
+          # the GitHub token directly (which the npm registry rejects).
+          # Without registry-url, npm handles OIDC auth internally when
+          # --provenance is passed and id-token: write is available.
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
