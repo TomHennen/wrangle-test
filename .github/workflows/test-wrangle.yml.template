@@ -93,6 +93,7 @@ jobs:
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
+      ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
 
   # Python opt-out fixture — exercises the uv path AND verify-provenance: false.
@@ -193,6 +194,7 @@ jobs:
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
     with:
       path: npm
+      ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
 
   # Publish to npmjs.org via Trusted Publishing (OIDC). Mirrors the
@@ -234,12 +236,19 @@ jobs:
           path: dist/
 
       - name: Publish to npmjs.org with provenance
-        env:
-          # Tarball name via env — never via direct ${{ ... }} interpolation
-          # in the run: body. See wrangle's CLAUDE.md, "GitHub Actions
-          # Expression Injection".
-          TARBALL: ${{ needs.test-npm.outputs.tarball }}
-        run: npm publish "dist/${TARBALL}" --provenance --tag integration
+        run: |
+          set -euo pipefail
+          # Locate the tarball dynamically rather than relying on a fixed
+          # path — robust against download-artifact layout variations
+          # across major versions.
+          tgz="$(find dist -name '*.tgz' -print -quit)"
+          if [[ -z "$tgz" ]]; then
+            echo "::error::No .tgz found in dist/"
+            find dist -ls >&2
+            exit 1
+          fi
+          printf 'Publishing %s\n' "$tgz"
+          npm publish "$tgz" --provenance --tag integration
 
   test-scan:
     permissions:
