@@ -222,16 +222,13 @@ jobs:
       id-token: write   # OIDC for Trusted Publishing
       contents: read
     steps:
+      # Node 24 ships npm 11.x which supports Trusted Publishing
+      # (OIDC-based auth). Node 22's npm 10.x only supports --provenance
+      # for Sigstore signing, not OIDC auth (requires npm >= 11.5.1).
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-
-      # npm Trusted Publishing (OIDC auth) requires npm >= 11.5.1.
-      # Node 22 ships npm 10.x which only supports --provenance for
-      # signing, not OIDC-based auth. Upgrade npm in-place.
-      - name: Upgrade npm for Trusted Publishing support
-        run: npm install -g npm@latest
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
