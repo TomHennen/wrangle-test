@@ -49,7 +49,13 @@ jobs:
       actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
     with:
-      path: container
+      # Distinct path from test-container so the wrangle reusable workflow's
+      # path-derived shortname (and the artifact names that key off it)
+      # don't collide between the two parallel calls. container-no-verify/
+      # is a clone of container/ — same Dockerfile, same app — only the
+      # directory differs. Mirrors how the python fixture pair (python +
+      # python-uv) already uses distinct paths.
+      path: container-no-verify
       imagename: ghcr.io/tomhennen/wrangle-test-staging-no-verify
       registry: ghcr.io
       release-events: non-pull-request
