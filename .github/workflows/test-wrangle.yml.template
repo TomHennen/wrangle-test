@@ -203,6 +203,29 @@ jobs:
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
 
+  # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack
+  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`) plus the
+  # default verify-provenance: true path. Build-only — publish-to-
+  # npmjs.org is already covered by test-npm via the same package name
+  # (@tomhennen/wrangle-integration-fixture). Running the publish step
+  # twice in one workflow run would race on the `integration` dist-tag
+  # version. Mirrors test-python-uv's "double up coverage on one
+  # fixture" pattern.
+  #
+  # No prep-pnpm step: the pnpm/ fixture's version stays at 0.0.1
+  # because we never publish it. github.sha (the triggering commit)
+  # is what gets checked out, which is what wrangle's reusable
+  # workflow does by default when `ref` is empty.
+  test-pnpm:
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
+    with:
+      path: pnpm
+      release-events: non-pull-request
+
   # Publish to npmjs.org via Trusted Publishing (OIDC). Mirrors the
   # publish-python pattern: gated on should-release, runs in this
   # caller workflow (not wrangle's reusable workflow) because Trusted
