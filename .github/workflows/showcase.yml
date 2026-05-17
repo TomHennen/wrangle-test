@@ -52,9 +52,10 @@ jobs:
   #
   # Version: a `v*` tag -> the tag (`v1.2.3` -> `1.2.3`); a `nightly-*`
   # tag -> a dev version keyed by the tag's date; a manual dispatch ->
-  # a dev version keyed by run id. The container/shell/scan jobs do not
-  # consume this branch — they have no in-source version — so they build
-  # the triggering commit directly and skip `needs: [prep]`.
+  # a dev version keyed by run id. Only the published fixtures (python,
+  # npm) need the bump; the others (shell, container, scan, and the
+  # build-only python-uv/pnpm jobs) build the triggering commit directly
+  # and skip `needs: [prep]`.
   prep:
     runs-on: ubuntu-latest
     permissions:
@@ -117,11 +118,18 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-showcase
       registry: ghcr.io
       release-events: non-pull-request
+      # The SLSA generator sometimes misdetects public repos as private
+      # when the run was triggered by a PAT-pushed ref — which the nightly
+      # always is (showcase-nightly-tag.yml). Safe: wrangle-test is public
+      # and disposable. Matches test-wrangle.yml.template.
+      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
   # Container opt-out fixture — exercises verify-image: false so the
   # nightly heartbeat covers that branch of the container workflow too.
+  # Uses its own fixture dir (a clone of container/) so the reusable
+  # workflow's path-derived artifact names don't collide with `container`.
   container-no-verify:
     permissions:
       contents: read
@@ -130,11 +138,12 @@ jobs:
       actions: read
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
-      path: container
+      path: container-no-verify
       imagename: ghcr.io/tomhennen/wrangle-test-showcase-no-verify
       registry: ghcr.io
       release-events: non-pull-request
       verify-image: false
+      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -180,6 +189,21 @@ jobs:
     with:
       path: npm
       ref: showcase-build
+      release-events: non-pull-request
+
+  # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack,
+  # `pnpm install --frozen-lockfile`, `pnpm pack`). Build-only: the pnpm
+  # fixture shares the npm fixture's package name, so publishing both
+  # would collide — publish coverage stays in the `npm` job. Static
+  # version, builds the triggering commit directly (no prep).
+  pnpm:
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: pnpm
       release-events: non-pull-request
 
   # Source scan. Limited to osv + zizmor: scorecard needs default-branch
@@ -228,7 +252,7 @@ jobs:
       # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
       # minimum for OIDC publish, and v6 does not inject an empty
       # NODE_AUTH_TOKEN that would downgrade to legacy token auth.
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
@@ -239,19 +263,23 @@ jobs:
           path: dist/
       # `./` prefix is load-bearing: without it npm's package-arg parser
       # treats `dist/foo.tgz` as a GitHub shorthand instead of a file.
+      # `--tag showcase` keeps these off the package's `latest` and
+      # `integration` dist-tags — the npm fixture is shared with the
+      # integration test (see test-wrangle.yml.template).
       - name: Publish to npmjs.org
         env:
           TARBALL: ${{ needs.npm.outputs.tarball }}
-        run: npm publish "./dist/${TARBALL}" --provenance --access public
+        run: npm publish "./dist/${TARBALL}" --provenance --tag showcase
 
   # ----- permanent example artifacts on the GitHub Release -------------
 
-  # The SLSA generator already attached each build's L3 provenance bundle
-  # to the Release for this tag (its upload-assets job fires on
-  # refs/tags/*). This job adds the dist files and SBOMs so the Release
-  # is a complete worked example (TomHennen/wrangle#200), and marks
-  # `nightly-*` Releases as pre-releases so they stay distinct from the
-  # curated `v*` ones. Skipped on workflow_dispatch (no tag).
+  # Stopgap until wrangle attaches build outputs to the Release itself
+  # (TomHennen/wrangle#228). The SLSA generator already attaches each
+  # build's L3 provenance (its upload-assets job fires on refs/tags/*);
+  # this job adds the dist + SBOM so the Release is a complete worked
+  # example (TomHennen/wrangle#200), and marks `nightly-*` Releases as
+  # pre-releases. Skipped on workflow_dispatch (no tag). Delete once
+  # wrangle#228 ships.
   release-assets:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: [python, npm]
@@ -259,45 +287,35 @@ jobs:
     permissions:
       contents: write   # create/edit the GitHub Release
     steps:
+      # One download of every run artifact; each lands under
+      # artifacts/<artifact-name>/.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.python.outputs.dist-artifact-name }}
-          path: python-dist/
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.python.outputs.metadata-artifact-name }}
-          path: python-meta/
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.npm.outputs.dist-artifact-name }}
-          path: npm-dist/
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.npm.outputs.metadata-artifact-name }}
-          path: npm-meta/
+          path: artifacts
       - name: Attach dist + SBOM to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          PYTHON_DIST: ${{ needs.python.outputs.dist-artifact-name }}
+          PYTHON_META: ${{ needs.python.outputs.metadata-artifact-name }}
+          NPM_DIST: ${{ needs.npm.outputs.dist-artifact-name }}
+          NPM_META: ${{ needs.npm.outputs.metadata-artifact-name }}
         run: |
           set -euo pipefail
           mkdir -p upload
-          # dist filenames already carry the package name + version, so
-          # they are unique; SBOMs are all `sbom.spdx.json`, so prefix.
-          cp python-dist/* upload/
-          cp npm-dist/* upload/
-          cp python-meta/sbom.spdx.json upload/python-sbom.spdx.json
-          cp npm-meta/sbom.spdx.json upload/npm-sbom.spdx.json
+          # dist filenames carry package name + version (unique); SBOMs are
+          # all `sbom.spdx.json`, so prefix them by build type.
+          cp "artifacts/${PYTHON_DIST}"/* upload/
+          cp "artifacts/${NPM_DIST}"/* upload/
+          cp "artifacts/${PYTHON_META}/sbom.spdx.json" upload/python-sbom.spdx.json
+          cp "artifacts/${NPM_META}/sbom.spdx.json" upload/npm-sbom.spdx.json
 
           create_flags=()
           if [[ "$GITHUB_REF" == refs/tags/nightly-* ]]; then
             create_flags+=(--prerelease)
           fi
-
-          # The SLSA generator's upload-assets job already created the
-          # Release for this tag; `|| true` covers the case where it has
-          # not yet. `gh release edit` then guarantees the pre-release
-          # flag regardless of which path created the Release.
+          # The SLSA generator's upload-assets job usually created the
+          # Release already; `|| true` covers the case where it has not.
           gh release create "$TAG" --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, SLSA L3 provenance, dist)." \
             --verify-tag "${create_flags[@]}" || true
