@@ -1,0 +1,24 @@
+{
+  "name": "wrangle-test-npm-fixture",
+  "version": "0.0.1",
+  "description": "Disposable npm test fixture for wrangle integration tests",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": "./src/index.js",
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomhennen/wrangle-test.git",
+    "directory": "npm"
+  }
+}

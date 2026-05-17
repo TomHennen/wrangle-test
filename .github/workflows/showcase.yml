@@ -1,0 +1,285 @@
+name: Showcase
+
+# Stable, non-template companion to test-wrangle.yml.template.
+#
+# Two jobs in one workflow:
+#   1. A nightly integration test of *every* wrangle reusable workflow
+#      (build_shell, build_and_publish_container, build_and_publish_python,
+#      build_and_publish_npm, check_source_change) against real GitHub
+#      Actions infrastructure — a heartbeat that catches infrastructure
+#      regressions (Sigstore root rotation, registry API changes, action
+#      breakage) even when no wrangle PR is open.
+#   2. A worked example of what wrangle produces. On a `v*` tag push the
+#      SLSA generator attaches the L3 provenance to the GitHub Release;
+#      the release-assets job adds the dist + SBOM. Permanent, clickable
+#      URLs for wrangle's adopter-facing docs (TomHennen/wrangle#200).
+#
+# Unlike the integration template this file is NOT generated and NOT
+# pinned to a per-PR SHA — it lives on `main` and runs on a schedule.
+#
+# TODO(wrangle-test#10): wrangle's reusable workflows are pinned at
+# `@main` because no wrangle release tag yet carries the npm/python
+# workflows + release-events machinery. Repoint to a release tag once
+# one exists, and drop the zizmor unpinned-uses suppressions.
+
+on:
+  schedule:
+    # Nightly ~07:23 UTC. Off the hour, per GitHub's scheduling guidance.
+    - cron: "23 7 * * *"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Serialize runs: prep force-pushes the shared `showcase-build` branch,
+# so an overlapping schedule + manual run must not race on it.
+concurrency:
+  group: showcase
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # Compute a unique package version for this run and stage it on the
+  # `showcase-build` branch. PyPI and npm both reject re-publishing an
+  # existing version, so every run needs a fresh one. The reusable
+  # python/npm workflows build from a `ref` input, so the bumped version
+  # has to be committed somewhere their checkout can see it — hence a
+  # dedicated branch, force-pushed each run (no history accumulation).
+  #
+  # On a `v*` tag the version is the tag (`v1.2.3` -> `1.2.3`); otherwise
+  # it is a dev version keyed by run id. The container/shell/scan jobs do
+  # not consume this branch — they have no in-source version — so they
+  # build the triggering commit directly and skip `needs: [prep]`.
+  prep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # force-push the showcase-build branch
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
+      - name: Stage versions on showcase-build
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            PY_VERSION="$VERSION"
+            NPM_VERSION="$VERSION"
+            printf 'Tag push: building release version %s\n' "$VERSION"
+          else
+            # PEP 440 dev release for python, SemVer pre-release for npm.
+            PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
+            NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
+            printf 'Non-tag run: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
+          fi
+
+          sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" python/pyproject.toml
+          # `npm version` rewrites package.json AND package-lock.json so
+          # `npm ci` in the build stays in sync.
+          ( cd npm && npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version )
+
+          git config user.name "wrangle-showcase"
+          git config user.email "wrangle-showcase@users.noreply.github.com"
+          git add python/pyproject.toml npm/package.json npm/package-lock.json
+          git commit -m "showcase: pin versions (python ${PY_VERSION}, npm ${NPM_VERSION})" \
+            || printf 'No version change to commit\n'
+          git push --force origin "HEAD:showcase-build"
+
+  # ----- one job per wrangle build type --------------------------------
+
+  shell:
+    permissions:
+      contents: read
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      scan-path: shell
+
+  # Container fixture — default verify-image: true path. Publishes to
+  # ghcr.io; ghcr needs only GITHUB_TOKEN, no Trusted Publisher.
+  container:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-showcase
+      registry: ghcr.io
+      release-events: non-pull-request
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Container opt-out fixture — exercises verify-image: false so the
+  # nightly heartbeat covers that branch of the container workflow too.
+  container-no-verify:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-showcase-no-verify
+      registry: ghcr.io
+      release-events: non-pull-request
+      verify-image: false
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Python fixture (hatchling / PEP 517 path) — build + test (pytest) +
+  # SLSA L3 provenance + wrangle's own verify. Built from showcase-build
+  # so it picks up prep's version bump.
+  python:
+    needs: [prep]
+    permissions:
+      contents: write   # SLSA generator's upload-assets job; validated at startup
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: python
+      ref: showcase-build
+      release-events: non-pull-request
+
+  # Python fixture (uv path) — exercises the uv tooling branch AND
+  # verify-provenance: false. Build-only (publish coverage is in the
+  # `python` job above), so it keeps a static version and builds the
+  # triggering commit directly.
+  python-uv:
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: python-uv
+      release-events: non-pull-request
+      verify-provenance: false
+
+  # npm fixture — build + test (`npm test`) + SLSA L3 provenance +
+  # wrangle's own verify. Built from showcase-build for the version bump.
+  npm:
+    needs: [prep]
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: npm
+      ref: showcase-build
+      release-events: non-pull-request
+
+  # Source scan. Limited to osv + zizmor: scorecard needs default-branch
+  # context (a `v*` tag push does not provide it) and dependency-review
+  # is pull_request-only — neither fits a tag/schedule-triggered run.
+  scan:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      tools: "osv zizmor"
+
+  # ----- registry publish (adopter-owned, mirrors gh_workflow_examples) -
+
+  # Publish the python dist to TestPyPI. Publishing lives here, not in
+  # wrangle's reusable workflow, because PyPI Trusted Publishing binds
+  # the OIDC token to the caller workflow's filename.
+  publish-python:
+    if: ${{ needs.python.outputs.should-release == 'true' }}
+    needs: [python]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.python.outputs.dist-artifact-name }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          attestations: true
+          packages-dir: dist/
+          repository-url: "https://test.pypi.org/legacy/"
+
+  # Publish the npm tarball to npmjs.org via Trusted Publishing (OIDC).
+  publish-npm:
+    if: ${{ needs.npm.outputs.should-release == 'true' }}
+    needs: [npm]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing
+      contents: read
+    steps:
+      # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
+      # minimum for OIDC publish, and v6 does not inject an empty
+      # NODE_AUTH_TOKEN that would downgrade to legacy token auth.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.npm.outputs.dist-artifact-name }}
+          path: dist/
+      # `./` prefix is load-bearing: without it npm's package-arg parser
+      # treats `dist/foo.tgz` as a GitHub shorthand instead of a file.
+      - name: Publish to npmjs.org
+        env:
+          TARBALL: ${{ needs.npm.outputs.tarball }}
+        run: npm publish "./dist/${TARBALL}" --provenance --access public
+
+  # ----- permanent example artifacts on the GitHub Release -------------
+
+  # On a `v*` tag the SLSA generator already attached each build's L3
+  # provenance bundle to the Release (its upload-assets job fires on
+  # refs/tags/*). This job adds the dist files and SBOMs so the Release
+  # is a complete worked example (TomHennen/wrangle#200).
+  release-assets:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [python, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/edit the GitHub Release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.python.outputs.dist-artifact-name }}
+          path: python-dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.python.outputs.metadata-artifact-name }}
+          path: python-meta/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.npm.outputs.dist-artifact-name }}
+          path: npm-dist/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.npm.outputs.metadata-artifact-name }}
+          path: npm-meta/
+      - name: Attach dist + SBOM to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # dist filenames already carry the package name + version, so
+          # they are unique; SBOMs are all `sbom.spdx.json`, so prefix.
+          cp python-dist/* upload/
+          cp npm-dist/* upload/
+          cp python-meta/sbom.spdx.json upload/python-sbom.spdx.json
+          cp npm-meta/sbom.spdx.json upload/npm-sbom.spdx.json
+
+          # The SLSA generator's upload-assets job already created the
+          # Release for this tag; `|| true` covers the race-free case
+          # where it has not yet.
+          gh release create "$TAG" --title "$TAG" \
+            --notes "wrangle-test showcase build — example wrangle outputs (SBOM, SLSA L3 provenance, dist)." \
+            --verify-tag || true
+          gh release upload "$TAG" upload/* --clobber
