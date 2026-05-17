@@ -1,0 +1,71 @@
+name: Showcase Nightly Tag
+
+# Pushes a dated `nightly-*` tag every night. The tag triggers
+# showcase.yml — and because it is a real tag push, that run exercises
+# wrangle's full pipeline including the GitHub Release assets, which a
+# `schedule:`-triggered run cannot (wrangle gates provenance
+# upload-to-Release on refs/tags/*).
+#
+# The tag MUST be pushed with a PAT, not GITHUB_TOKEN: a tag pushed by
+# GITHUB_TOKEN does not trigger `on: push` workflows (GitHub's recursion
+# guard). SHOWCASE_TAG_PAT is a token with contents:write on this repo.
+#
+# This workflow also prunes `nightly-*` tags and their Releases older
+# than KEEP_DAYS so they do not accumulate forever.
+
+on:
+  schedule:
+    - cron: "23 7 * * *"   # nightly ~07:23 UTC, off the hour
+  workflow_dispatch:
+
+concurrency:
+  group: showcase-nightly-tag
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  nightly-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] PAT must be persisted to push the trigger tag
+        with:
+          # A PAT, not GITHUB_TOKEN, so the tag push triggers showcase.yml.
+          token: ${{ secrets.SHOWCASE_TAG_PAT }}
+
+      - name: Push today's nightly tag
+        run: |
+          set -euo pipefail
+          TAG="nightly-$(date -u +%Y%m%d)"
+          # Lightweight tag on the checked-out commit (main HEAD).
+          # Force covers a same-day re-run.
+          git tag -f "$TAG"
+          git push -f origin "refs/tags/${TAG}"
+          printf 'Pushed %s — showcase.yml will run\n' "$TAG"
+
+      - name: Prune old nightly tags and releases
+        env:
+          GH_TOKEN: ${{ secrets.SHOWCASE_TAG_PAT }}
+          KEEP_DAYS: "10"
+        run: |
+          set -euo pipefail
+          CUTOFF="$(date -u -d "${KEEP_DAYS} days ago" +%Y%m%d)"
+          printf 'Pruning nightly-* tags dated before %s\n' "$CUTOFF"
+          gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/nightly-" \
+            --jq '.[].ref' | while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            tag="${ref#refs/tags/}"
+            date_part="${tag#nightly-}"
+            [[ "$date_part" =~ ^[0-9]{8}$ ]] || continue
+            # 10# forces base-10 so a leading zero is not read as octal.
+            if (( 10#$date_part < 10#$CUTOFF )); then
+              printf 'Pruning %s\n' "$tag"
+              # --cleanup-tag deletes the Release and the tag together;
+              # fall back to deleting the bare ref if there is no Release.
+              gh release delete "$tag" --yes --cleanup-tag 2>/dev/null \
+                || gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/${ref}" 2>/dev/null \
+                || printf 'WARNING: could not prune %s\n' "$tag"
+            fi
+          done

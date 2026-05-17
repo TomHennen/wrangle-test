@@ -45,18 +45,26 @@ carry no unit tests.
 ## Showcase workflow
 
 `.github/workflows/showcase.yml` is a non-template, stable companion to
-the per-PR integration test. It is **not** generated and **not** pinned
-to a per-PR wrangle SHA — it lives on `main` and runs:
+the per-PR integration test — not generated, not pinned to a per-PR
+wrangle SHA. It runs on every tag push, exercising every wrangle
+reusable workflow end to end (build, test, SBOM, SLSA L3 provenance,
+verify, publish) and attaching the provenance + dist + SBOM to the
+GitHub Release:
 
-- **nightly** (and on demand via `workflow_dispatch`) — a heartbeat
-  integration test of every wrangle reusable workflow against real
-  GitHub Actions infrastructure, catching infrastructure regressions
-  (Sigstore root rotation, registry API changes) between wrangle PRs;
-- **on a `v*` tag push** — additionally attaches the SLSA L3 provenance,
-  dist, and SBOM to the GitHub Release as permanent, clickable example
-  artifacts for wrangle's adopter-facing docs.
+- **`nightly-*` tags** — pushed automatically by
+  `showcase-nightly-tag.yml` each night. A heartbeat that catches
+  infrastructure regressions (Sigstore root rotation, registry API
+  changes) between wrangle PRs. Marked as pre-releases and pruned after
+  ~10 days.
+- **`v*` tags** — curated releases, kept as the stable, clickable
+  example artifacts for wrangle's adopter-facing docs.
 
-It publishes the fixtures to TestPyPI, npmjs.org, and `ghcr.io`. See
+The nightly is driven by a real tag rather than a `schedule:` trigger
+on purpose: wrangle gates provenance-upload-to-Release on `refs/tags/*`,
+so only a tag push exercises that path. (`showcase-nightly-tag.yml`
+pushes the tag with a PAT — a tag pushed by `GITHUB_TOKEN` would not
+trigger `showcase.yml`.) It publishes the fixtures to TestPyPI,
+npmjs.org, and `ghcr.io`. See
 [TomHennen/wrangle#200](https://github.com/TomHennen/wrangle/issues/200).
 
 ## Maintenance
