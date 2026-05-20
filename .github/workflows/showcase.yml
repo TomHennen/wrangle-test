@@ -2,22 +2,28 @@ name: Showcase
 
 # Stable, non-template companion to test-wrangle.yml.template.
 #
-# Runs on every tag push and exercises *every* wrangle reusable workflow
-# (build_shell, build_and_publish_container, build_and_publish_python,
-# build_and_publish_npm, check_source_change) end to end against real
-# GitHub Actions infrastructure:
-#   - `nightly-*` tags — pushed automatically by showcase-nightly-tag.yml.
-#     A heartbeat integration test that catches infrastructure regressions
-#     (Sigstore root rotation, registry API changes, action breakage)
-#     between wrangle PRs.
-#   - `v*` tags — curated releases kept as the stable, clickable example
-#     artifacts for wrangle's adopter-facing docs (TomHennen/wrangle#200).
+# Runs on every `v*` tag push and exercises *every* wrangle reusable
+# workflow (build_shell, build_and_publish_container,
+# build_and_publish_python, build_and_publish_npm, check_source_change)
+# end to end against real GitHub Actions infrastructure. Two flavors:
 #
-# Either way the SLSA generator attaches each build's L3 provenance to the
-# GitHub Release and the release-assets job adds the dist + SBOM. Driving
-# the nightly through a real tag (not a `schedule:` trigger) is deliberate:
-# wrangle gates provenance-upload-to-Release on refs/tags/*, so only a tag
-# push exercises that path.
+#   - Tracking tags `vYYYYMMDD-<wrangle-sha>` — pushed automatically by
+#     wrangle's own release-showcase.yml when its reusable workflows or
+#     actions change on `main`. Marked as pre-releases. This is the
+#     heartbeat that catches infra regressions (Sigstore root rotation,
+#     registry API changes, action breakage) between wrangle releases —
+#     event-driven instead of time-driven, so freshness tracks actual
+#     wrangle changes rather than the wall clock.
+#
+#   - Curated tags `vX.Y.Z` — pushed by hand (or via the GitHub Release
+#     UI) for the stable, clickable example artifacts in wrangle's
+#     adopter-facing docs (TomHennen/wrangle#200).
+#
+# Either way the SLSA generator attaches each build's L3 provenance to
+# the GitHub Release and the release-assets job adds the dist + SBOM.
+# Driving runs through a real tag (not a `schedule:` trigger) is
+# deliberate: wrangle gates provenance-upload-to-Release on
+# refs/tags/*, so only a tag push exercises that path.
 #
 # Unlike the integration template this file is NOT generated and NOT
 # pinned to a per-PR SHA — it lives on `main`.
@@ -29,9 +35,7 @@ name: Showcase
 
 on:
   push:
-    # `v*` = curated releases; `nightly-*` = the automated nightly run,
-    # tagged by showcase-nightly-tag.yml.
-    tags: ["v*", "nightly-*"]
+    tags: ["v*"]
   workflow_dispatch:
 
 # Serialize runs: prep force-pushes the shared `showcase-build` branch,
@@ -50,12 +54,12 @@ jobs:
   # has to be committed somewhere their checkout can see it — hence a
   # dedicated branch, force-pushed each run (no history accumulation).
   #
-  # Version: a `v*` tag -> the tag (`v1.2.3` -> `1.2.3`); a `nightly-*`
-  # tag -> a dev version keyed by the tag's date; a manual dispatch ->
-  # a dev version keyed by run id. Only the published fixtures (python,
-  # npm) need the bump; the others (shell, container, scan, and the
-  # build-only python-uv/pnpm jobs) build the triggering commit directly
-  # and skip `needs: [prep]`.
+  # Version: a curated `vX.Y.Z` tag -> the tag (`v1.2.3` -> `1.2.3`); a
+  # tracking `vYYYYMMDD-<sha>` tag -> a dev version keyed by the date; a
+  # manual workflow_dispatch -> a dev version keyed by run id. Only the
+  # published fixtures (python, npm) need the bump; the others (shell,
+  # container, scan, and the build-only python-uv/pnpm jobs) build the
+  # triggering commit directly and skip `needs: [prep]`.
   prep:
     runs-on: ubuntu-latest
     permissions:
@@ -65,17 +69,20 @@ jobs:
       - name: Stage versions on showcase-build
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            PY_VERSION="$VERSION"
-            NPM_VERSION="$VERSION"
-            printf 'Curated release: version %s\n' "$VERSION"
-          elif [[ "$GITHUB_REF" == refs/tags/nightly-* ]]; then
-            # nightly-YYYYMMDD -> PEP 440 dev release / SemVer pre-release.
-            DATE="${GITHUB_REF#refs/tags/nightly-}"
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION_PART="${TAG#v}"
+          if [[ "$VERSION_PART" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            PY_VERSION="$VERSION_PART"
+            NPM_VERSION="$VERSION_PART"
+            printf 'Curated release: version %s\n' "$VERSION_PART"
+          elif [[ "$VERSION_PART" =~ ^([0-9]{8})- ]]; then
+            # Tracking tag vYYYYMMDD-<sha> -> PEP 440 dev / SemVer pre-release.
+            # The date alone keys the version; the SHA in the tag is for
+            # traceability on the wrangle side, not for package versions.
+            DATE="${BASH_REMATCH[1]}"
             PY_VERSION="0.0.1.dev${DATE}"
             NPM_VERSION="0.0.1-dev.${DATE}"
-            printf 'Nightly run: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
+            printf 'Tracking tag: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
           else
             # Manual workflow_dispatch — key the dev version by run id.
             PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
@@ -119,17 +126,19 @@ jobs:
       registry: ghcr.io
       release-events: non-pull-request
       # The SLSA generator sometimes misdetects public repos as private
-      # when the run was triggered by a PAT-pushed ref — which the nightly
-      # always is (showcase-nightly-tag.yml). Safe: wrangle-test is public
-      # and disposable. Matches test-wrangle.yml.template.
+      # when the run was triggered by a ref pushed with a non-GITHUB_TOKEN
+      # credential — which every showcase run is (tracking tags are pushed
+      # by wrangle's release-showcase.yml via a PAT; curated tags are
+      # pushed manually). Safe: wrangle-test is public and disposable.
+      # Matches test-wrangle.yml.template.
       publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
   # Container opt-out fixture — exercises verify-image: false so the
-  # nightly heartbeat covers that branch of the container workflow too.
-  # Uses its own fixture dir (a clone of container/) so the reusable
-  # workflow's path-derived artifact names don't collide with `container`.
+  # showcase covers that branch of the container workflow too. Uses its
+  # own fixture dir (a clone of container/) so the reusable workflow's
+  # path-derived artifact names don't collide with `container`.
   container-no-verify:
     permissions:
       contents: read
@@ -208,7 +217,7 @@ jobs:
 
   # Source scan. Limited to osv + zizmor: scorecard needs default-branch
   # context (a `v*` tag push does not provide it) and dependency-review
-  # is pull_request-only — neither fits a tag/schedule-triggered run.
+  # is pull_request-only — neither fits a tag-triggered run.
   scan:
     permissions:
       actions: read
@@ -277,7 +286,7 @@ jobs:
   # (TomHennen/wrangle#228). The SLSA generator already attaches each
   # build's L3 provenance (its upload-assets job fires on refs/tags/*);
   # this job adds the dist + SBOM so the Release is a complete worked
-  # example (TomHennen/wrangle#200), and marks `nightly-*` Releases as
+  # example (TomHennen/wrangle#200), and marks tracking-tag Releases as
   # pre-releases. Skipped on workflow_dispatch (no tag). Delete once
   # wrangle#228 ships.
   release-assets:
@@ -310,8 +319,11 @@ jobs:
           cp "artifacts/${PYTHON_META}/sbom.spdx.json" upload/python-sbom.spdx.json
           cp "artifacts/${NPM_META}/sbom.spdx.json" upload/npm-sbom.spdx.json
 
+          # Curated `vX.Y.Z` -> full release; tracking `vYYYYMMDD-<sha>`
+          # -> pre-release (keeps them out of the "Latest release" badge).
           create_flags=()
-          if [[ "$GITHUB_REF" == refs/tags/nightly-* ]]; then
+          version_part="${TAG#v}"
+          if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             create_flags+=(--prerelease)
           fi
           # The SLSA generator's upload-assets job usually created the
@@ -319,7 +331,7 @@ jobs:
           gh release create "$TAG" --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, SLSA L3 provenance, dist)." \
             --verify-tag "${create_flags[@]}" || true
-          if [[ "$GITHUB_REF" == refs/tags/nightly-* ]]; then
+          if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             gh release edit "$TAG" --prerelease
           fi
           gh release upload "$TAG" upload/* --clobber
