@@ -4,6 +4,9 @@
   "description": "Disposable test fixture for wrangle's npm integration tests (pnpm variant). Do not depend on this package.",
   "license": "MIT",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/TomHennen/wrangle-test"
