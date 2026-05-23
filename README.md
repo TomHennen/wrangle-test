@@ -53,22 +53,28 @@ reusable workflow end to end (build, test, SBOM, SLSA L3 provenance,
 verify, publish) and attaching the provenance + dist + SBOM to the
 GitHub Release:
 
-- **Tracking tags `vYYYYMMDD-<wrangle-sha>`** — pushed automatically by
-  wrangle's `release-showcase.yml` when its reusable workflows or
-  actions change on `main`. A heartbeat that catches infrastructure
+- **Tracking tags `vYYYYMMDD-<wrangle-sha7>`** — pushed automatically by
+  wrangle's `release-showcase.yml` on every push to `main`. The
+  push-tag script short-circuits when there's no `git diff` against
+  the wrangle SHA embedded in the most recent tracking tag, so doc-only
+  commits don't produce a run. A heartbeat that catches infrastructure
   regressions (Sigstore root rotation, registry API changes) between
-  wrangle releases — event-driven so freshness tracks actual wrangle
-  changes rather than the wall clock. Marked as pre-releases.
+  wrangle releases. Marked as pre-releases and **pruned after 30 days**
+  by the showcase workflow itself (`prune-tracking-tags` job, filtered
+  strictly on the tracking-tag regex AND `prerelease: true`, so curated
+  releases are never touched).
 - **Curated tags `vX.Y.Z`** — pushed by hand (or via GitHub's "Draft a
   new release" UI) for the stable, clickable example artifacts in
-  wrangle's adopter-facing docs.
+  wrangle's adopter-facing docs. Full releases, never pruned.
 
 The showcase is driven by tag pushes rather than a `schedule:` trigger
 on purpose: wrangle gates provenance-upload-to-Release on `refs/tags/*`,
 so only a tag push exercises that path. Tracking tags are pushed from
 wrangle with a PAT — a tag pushed by `GITHUB_TOKEN` would not trigger
-`showcase.yml`. The workflow publishes the fixtures to TestPyPI,
-npmjs.org, and `ghcr.io`. See
+`showcase.yml`. There is no `paths:` filter on the wrangle side;
+the runtime-diff check in `push_showcase_tag.sh` replaces the
+allowlist (which would silently drift). The workflow publishes the
+fixtures to TestPyPI, npmjs.org, and `ghcr.io`. See
 [TomHennen/wrangle#200](https://github.com/TomHennen/wrangle/issues/200).
 
 ## Maintenance

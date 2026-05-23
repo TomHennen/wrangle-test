@@ -335,3 +335,59 @@ jobs:
             gh release edit "$TAG" --prerelease
           fi
           gh release upload "$TAG" upload/* --clobber
+
+  # Prune old tracking tags + their pre-releases. Tracking tags
+  # accumulate one-per-wrangle-main-push and are only useful as a
+  # heartbeat — a 30-day window keeps "last month of showcase runs"
+  # visible without burying the curated `vX.Y.Z` releases that are the
+  # actual adopter-facing artifacts.
+  #
+  # Filters strictly on the `vYYYYMMDD-<sha7>` tag-name regex AND on
+  # `prerelease: true` so a hand-cut `vX.Y.Z` (full release) is never
+  # touched even if the regex matches by accident. Curated releases are
+  # forever; tracking-tag retention is purely cosmetic.
+  prune-tracking-tags:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # delete tags + releases
+    steps:
+      - name: Prune tracking tags older than KEEP_DAYS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_DAYS: "30"
+        run: |
+          set -euo pipefail
+          CUTOFF="$(date -u -d "${KEEP_DAYS} days ago" +%Y%m%d)"
+          printf 'Pruning tracking tags vYYYYMMDD-<sha> dated before %s\n' "$CUTOFF"
+
+          # List all refs matching the tracking-tag prefix in one paginated call.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/v" \
+            --jq '.[].ref' | while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            tag="${ref#refs/tags/}"
+            # Strict tracking-tag shape: vYYYYMMDD-<7 hex chars>. Anything
+            # else (curated vX.Y.Z, malformed, etc.) is left alone.
+            [[ "$tag" =~ ^v([0-9]{8})-[0-9a-f]{7}$ ]] || continue
+            date_part="${BASH_REMATCH[1]}"
+            # 10# forces base-10 so a leading zero is not read as octal.
+            (( 10#$date_part < 10#$CUTOFF )) || continue
+
+            # Belt + suspenders: only delete if the Release is marked
+            # prerelease. A hand-cut `vYYYYMMDD-abc1234` full release
+            # (unlikely but possible) would survive this check.
+            is_prerelease="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              --jq .prerelease 2>/dev/null || printf 'unknown')"
+            if [[ "$is_prerelease" != "true" ]]; then
+              printf 'SKIP %s (release prerelease=%s)\n' "$tag" "$is_prerelease"
+              continue
+            fi
+
+            printf 'Pruning %s\n' "$tag"
+            # --cleanup-tag deletes the Release and the tag together;
+            # fall back to deleting the bare ref if there is no Release.
+            gh release delete "$tag" --yes --cleanup-tag 2>/dev/null \
+              || gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/${ref}" 2>/dev/null \
+              || printf 'WARNING: could not prune %s\n' "$tag"
+          done
