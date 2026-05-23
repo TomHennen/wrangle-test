@@ -1,0 +1,48 @@
+# Goreleaser config for the wrangle integration test fixture.
+#
+# Single platform (linux/amd64), single binary, minimal archive — the
+# integration test exercises the wrangle Go build pipeline end-to-end
+# (gofmt, vet, test, govulncheck, build, SBOM, hash, provenance,
+# verify). Multi-platform and multi-binary cases are a separate
+# fixture concern; this one prioritizes pipeline coverage over matrix
+# coverage.
+#
+# version: 2 pins the goreleaser config schema. Required for
+# goreleaser >= v2.
+
+version: 2
+
+project_name: wrangle-test-fixture-go
+
+builds:
+  - id: example
+    main: ./cmd/example
+    binary: example
+    goos: [linux]
+    goarch: [amd64]
+    # Reproducibility defaults per build/actions/go/SPEC.md
+    # "Reproducibility". -trimpath strips local filesystem paths;
+    # -buildvcs=false suppresses VCS-info embedding (commit SHA,
+    # dirty flag, timestamps). Both are zero-runtime-cost.
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0     # Disabled here for fixture portability ONLY (no cgo deps); adopters should leave cgo on by default per SPEC.
+
+archives:
+  - id: example-archive
+    formats: [tar.gz]
+    # Plain archive name so slsa-verifier subject matching is
+    # straightforward.
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+
+# checksums.txt is what wrangle base64-encodes and hands to the SLSA
+# generator. goreleaser writes it by default; declaring it explicitly
+# pins the filename (wrangle's hash step assumes dist/checksums.txt).
+checksum:
+  name_template: 'checksums.txt'
+
+# Skip the changelog generation — fixture has no meaningful commit
+# history to summarize and the integration test doesn't exercise it.
+changelog:
+  disable: true
