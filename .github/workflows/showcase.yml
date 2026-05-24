@@ -100,7 +100,9 @@ jobs:
           git add python/pyproject.toml npm/package.json npm/package-lock.json
           git commit -m "showcase: pin versions (python ${PY_VERSION}, npm ${NPM_VERSION})" \
             || printf 'No version change to commit\n'
-          git push --force origin "HEAD:showcase-build"
+          # Fully qualify dst: with src=HEAD (detached, no local branch),
+          # git won't auto-qualify if the remote branch doesn't yet exist.
+          git push --force origin "HEAD:refs/heads/showcase-build"
 
   # ----- one job per wrangle build type --------------------------------
 
