@@ -24,6 +24,7 @@ jobs:
       packages: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
     with:
       path: container
@@ -47,6 +48,7 @@ jobs:
       packages: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
     with:
       # Distinct path from test-container so the wrangle reusable workflow's
@@ -96,6 +98,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python
@@ -111,6 +114,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
       path: python-uv
@@ -197,6 +201,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
     with:
       path: npm
@@ -221,6 +226,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
     with:
       path: pnpm
@@ -305,6 +311,7 @@ jobs:
       contents: write   # SLSA generator's upload-assets job + wrangle's publish job
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@__WRANGLE_SHA__
     with:
       path: go

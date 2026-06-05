@@ -121,6 +121,7 @@ jobs:
       packages: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: container
@@ -147,6 +148,7 @@ jobs:
       packages: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: container-no-verify
@@ -167,6 +169,7 @@ jobs:
       contents: write   # SLSA generator's upload-assets job; validated at startup
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: python
@@ -182,6 +185,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: python-uv
@@ -196,6 +200,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: npm
@@ -212,6 +217,7 @@ jobs:
       contents: write
       id-token: write
       actions: read
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
       path: pnpm
