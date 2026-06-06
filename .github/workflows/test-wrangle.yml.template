@@ -38,6 +38,42 @@ jobs:
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Regression backstop for the container VSA consumer command. The container
+  # VSA is an OCI 1.1 referrer (not the .att-tag SLSA provenance), and only
+  # cosign v3's verify-attestation reads it; the fixture-based consumer test in
+  # wrangle can't exercise that (it needs a live registry referrer), so the
+  # check lives here, run against the freshly pushed image. No registry auth:
+  # the staging image and Sigstore are public, so cosign verifies anonymously.
+  verify-container-vsa:
+    needs: [test-container]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify the container VSA referrer (origin-repo bound)
+        env:
+          IMAGE_REF: ${{ needs.test-container.outputs.imagename }}@${{ needs.test-container.outputs.digest }}
+          EXPECTED_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Integration runs sign on a branch push, so match the workflow SAN
+          # without the README's @refs/tags/v release constraint.
+          cosign verify-attestation \
+            --type https://slsa.dev/verification_summary/v1 \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/TomHennen/wrangle/\.github/workflows/build_and_publish_container\.yml@' \
+            --certificate-github-workflow-repository "$EXPECTED_REPO" \
+            "$IMAGE_REF" > vsa.json
+      - name: Decode the verified VSA predicate
+        env:
+          EXPECTED_DIGEST: ${{ needs.test-container.outputs.digest }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -r '.payload' vsa.json | base64 -d)"
+          jq -e ".subject[0].digest.sha256 == \"${EXPECTED_DIGEST#sha256:}\"" <<<"$payload"
+          jq -e '.predicate.verificationResult == "PASSED"' <<<"$payload"
+          jq -e '.predicate.verifiedLevels | index("SLSA_BUILD_LEVEL_3")' <<<"$payload"
+
   # Container opt-out fixture — exercises verify-image: false. Same
   # composite, same provenance generation; only wrangle's verify step
   # is skipped. Catches regressions where the workflow incorrectly
