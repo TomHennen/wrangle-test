@@ -1,46 +1,40 @@
 name: Showcase
 
-# Stable, non-template companion to test-wrangle.yml.template.
+# Stable, non-template companion to test-wrangle.yml.template: it runs the
+# real adopter-facing workflows end to end, where the template runs them
+# per-PR pinned to a PR SHA. Two tag flavors drive it:
 #
-# Runs on every `v*` tag push and exercises *every* wrangle reusable
-# workflow (build_shell, build_and_publish_container,
-# build_and_publish_python, build_and_publish_npm, check_source_change)
-# end to end against real GitHub Actions infrastructure. Two flavors:
+#   - Tracking tags `vYYYYMMDD-<wrangle-sha7>` — pushed automatically by
+#     wrangle's release-showcase.yml on every push to main. Marked as
+#     pre-releases; the heartbeat that catches infra regressions (Sigstore
+#     root rotation, registry/API changes) between wrangle releases.
+#   - Curated tags `vX.Y.Z` — pushed by hand for the stable, clickable
+#     example artifacts in wrangle's adopter docs (TomHennen/wrangle#200).
 #
-#   - Tracking tags `vYYYYMMDD-<wrangle-sha>` — pushed automatically by
-#     wrangle's own release-showcase.yml when its reusable workflows or
-#     actions change on `main`. Marked as pre-releases. This is the
-#     heartbeat that catches infra regressions (Sigstore root rotation,
-#     registry API changes, action breakage) between wrangle releases —
-#     event-driven instead of time-driven, so freshness tracks actual
-#     wrangle changes rather than the wall clock.
+# Tag-driven, not schedule-driven, on purpose: wrangle gates VSA-attach-to-
+# Release on refs/tags/*, so only a tag push exercises that path.
 #
-#   - Curated tags `vX.Y.Z` — pushed by hand (or via the GitHub Release
-#     UI) for the stable, clickable example artifacts in wrangle's
-#     adopter-facing docs (TomHennen/wrangle#200).
+# Three sections, fenced below: the build-type example jobs (each mirrors a
+# gh_workflow_examples/ template — the part an adopter copies), the adopter-
+# owned registry-publish jobs (separate because Trusted Publishing binds the
+# OIDC token to the caller workflow's filename), and the showcase harness
+# (prep / release-assets / prune-tracking-tags) — test plumbing that exists
+# only because one repo runs every ecosystem off one tag, publishes to
+# registries that reject version reuse, and accumulates tracking tags to
+# prune. Ignore the harness when reading for "how do I use wrangle for X".
 #
-# Either way wrangle's attest job produces each build's L3 provenance
-# (actions/attest-build-provenance, stored in GitHub's attestation store),
-# the vsa job attaches the signed VSA to the GitHub Release, and the
-# release-assets job adds the dist + SBOM. Driving runs through a real tag
-# (not a `schedule:` trigger) is deliberate: wrangle gates the
-# VSA-attach-to-Release on refs/tags/*, so only a tag push exercises it.
-#
-# Unlike the integration template this file is NOT generated and NOT
-# pinned to a per-PR SHA — it lives on `main`.
-#
-# TODO(wrangle-test#10): wrangle's reusable workflows are pinned at
-# `@main` because no wrangle release tag yet carries the npm/python
-# workflows + release-events machinery. Repoint to a release tag once
-# one exists, and drop the zizmor unpinned-uses suppressions.
+# TODO(wrangle-test#10): wrangle's reusable workflows are pinned at `@main`
+# because no release tag yet carries the npm/python workflows + release-
+# events machinery. Repoint to a release tag once one exists, and drop the
+# zizmor unpinned-uses suppressions.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
-# Serialize runs: prep force-pushes the shared `showcase-build` branch,
-# so two overlapping runs must not race on it.
+# prep force-pushes the shared `showcase-build` branch, so overlapping runs
+# must not race on it.
 concurrency:
   group: showcase
   cancel-in-progress: false
@@ -48,19 +42,180 @@ concurrency:
 permissions: {}
 
 jobs:
+  # ===================================================================
+  # Build-type examples — each mirrors a gh_workflow_examples/ template
+  # and is the part an adopter reads and copies.
+  # ===================================================================
+
+  shell:
+    permissions:
+      contents: read
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      scan-path: shell
+
+  # Publishes to ghcr.io; ghcr needs only GITHUB_TOKEN, no Trusted Publisher.
+  container:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-showcase
+      registry: ghcr.io
+      release-events: non-pull-request
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # PEP 517 build + pytest + SLSA L3 provenance + verify. Built from the
+  # showcase-build branch for prep's per-run version bump (see harness below).
+  python:
+    needs: [prep]
+    permissions:
+      contents: write   # wrangle's vsa job (attach VSA to release); validated at startup
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: python
+      ref: showcase-build
+      release-events: non-pull-request
+
+  # uv tooling branch. Build-only (publish coverage is in `python`), so
+  # static version, builds the triggering commit.
+  python-uv:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: python-uv
+      release-events: non-pull-request
+
+  # npm ci + npm test + npm pack + SLSA L3 provenance + verify. Built from
+  # showcase-build for prep's version bump (see harness below).
+  npm:
+    needs: [prep]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: npm
+      ref: showcase-build
+      release-events: non-pull-request
+
+  # pnpm tooling branch (Corepack, frozen-lockfile, pnpm pack). Build-only:
+  # the pnpm fixture shares the npm fixture's package name, so publishing both
+  # would collide — publish coverage stays in `npm`. Static version, builds
+  # the triggering commit.
+  pnpm:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: pnpm
+      release-events: non-pull-request
+
+  # goreleaser build + SLSA L3 provenance + verify. Unlike python/npm,
+  # wrangle's Go workflow owns publish to the GitHub Release, so there's no
+  # separate publish-go job and no version bump (GitHub Releases don't reject
+  # reuse).
+  go:
+    permissions:
+      contents: write   # goreleaser creates the Release; wrangle's vsa job attaches the VSA
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      path: go
+      release-events: non-pull-request
+
+  # Source scan, limited to osv + zizmor: scorecard needs default-branch
+  # context (a tag push doesn't provide it) and dependency-review is
+  # pull_request-only — neither fits a tag-triggered run.
+  scan:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    with:
+      tools: "osv zizmor"
+
+  # ===================================================================
+  # Registry publish — adopter-owned (mirrors gh_workflow_examples).
+  # Lives here, not in wrangle's reusable workflow, because Trusted
+  # Publishing binds the OIDC token to the caller workflow's filename.
+  # ===================================================================
+
+  publish-python:
+    if: ${{ needs.python.outputs.should-release == 'true' }}
+    needs: [python]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.python.outputs.dist-artifact-name }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          attestations: true
+          packages-dir: dist/
+          repository-url: "https://test.pypi.org/legacy/"
+
+  publish-npm:
+    if: ${{ needs.npm.outputs.should-release == 'true' }}
+    needs: [npm]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing
+      contents: read
+    steps:
+      # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
+      # minimum for OIDC publish, and v6 does not inject an empty
+      # NODE_AUTH_TOKEN that would downgrade to legacy token auth.
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.npm.outputs.dist-artifact-name }}
+          path: dist/
+      # `./` prefix is load-bearing: without it npm's package-arg parser
+      # treats `dist/foo.tgz` as a GitHub shorthand instead of a file.
+      # `--tag showcase` keeps these off the package's `latest` and
+      # `integration` dist-tags — the npm fixture is shared with the
+      # integration test (see test-wrangle.yml.template).
+      - name: Publish to npmjs.org
+        env:
+          TARBALL: ${{ needs.npm.outputs.tarball }}
+        run: npm publish "./dist/${TARBALL}" --provenance --tag showcase
+
+  # ===================================================================
+  # Showcase harness — test plumbing, not adopter examples. Skip when
+  # reading for "how do I use wrangle for X".
+  # ===================================================================
+
   # Compute a unique package version for this run and stage it on the
   # `showcase-build` branch. PyPI and npm both reject re-publishing an
   # existing version, so every run needs a fresh one. The reusable
   # python/npm workflows build from a `ref` input, so the bumped version
   # has to be committed somewhere their checkout can see it — hence a
   # dedicated branch, force-pushed each run (no history accumulation).
-  #
-  # Version: a curated `vX.Y.Z` tag -> the tag (`v1.2.3` -> `1.2.3`); a
-  # tracking `vYYYYMMDD-<sha>` tag -> a dev version keyed by the date; a
-  # manual workflow_dispatch -> a dev version keyed by run id. Only the
-  # published fixtures (python, npm) need the bump; the others (shell,
-  # container, scan, and the build-only python-uv/pnpm jobs) build the
-  # triggering commit directly and skip `needs: [prep]`.
+  # Only the published fixtures (python, npm) need it; the others build
+  # the triggering commit directly and skip `needs: [prep]`.
   prep:
     runs-on: ubuntu-latest
     permissions:
@@ -105,163 +260,12 @@ jobs:
           # git won't auto-qualify if the remote branch doesn't yet exist.
           git push --force origin "HEAD:refs/heads/showcase-build"
 
-  # ----- one job per wrangle build type --------------------------------
-
-  shell:
-    permissions:
-      contents: read
-    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      scan-path: shell
-
-  # Container fixture — publishes to ghcr.io; ghcr needs only GITHUB_TOKEN,
-  # no Trusted Publisher.
-  container:
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: container
-      imagename: ghcr.io/tomhennen/wrangle-test-showcase
-      registry: ghcr.io
-      release-events: non-pull-request
-    secrets:
-      gh_token: ${{ secrets.GITHUB_TOKEN }}
-
-  # Python fixture (hatchling / PEP 517 path) — build + test (pytest) +
-  # SLSA L3 provenance + wrangle's own verify. Built from showcase-build
-  # so it picks up prep's version bump.
-  python:
-    needs: [prep]
-    permissions:
-      contents: write   # wrangle's vsa job (attach VSA to release); validated at startup
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: python
-      ref: showcase-build
-      release-events: non-pull-request
-
-  # Python fixture (uv path) — exercises the uv tooling branch. Build-only
-  # (publish coverage is in the `python` job above), so it keeps a static
-  # version and builds the triggering commit directly.
-  python-uv:
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: python-uv
-      release-events: non-pull-request
-
-  # npm fixture — build + test (`npm test`) + SLSA L3 provenance +
-  # wrangle's own verify. Built from showcase-build for the version bump.
-  npm:
-    needs: [prep]
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: npm
-      ref: showcase-build
-      release-events: non-pull-request
-
-  # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack,
-  # `pnpm install --frozen-lockfile`, `pnpm pack`). Build-only: the pnpm
-  # fixture shares the npm fixture's package name, so publishing both
-  # would collide — publish coverage stays in the `npm` job. Static
-  # version, builds the triggering commit directly (no prep).
-  pnpm:
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: pnpm
-      release-events: non-pull-request
-
-  # Source scan. Limited to osv + zizmor: scorecard needs default-branch
-  # context (a `v*` tag push does not provide it) and dependency-review
-  # is pull_request-only — neither fits a tag-triggered run.
-  scan:
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      tools: "osv zizmor"
-
-  # ----- registry publish (adopter-owned, mirrors gh_workflow_examples) -
-
-  # Publish the python dist to TestPyPI. Publishing lives here, not in
-  # wrangle's reusable workflow, because PyPI Trusted Publishing binds
-  # the OIDC token to the caller workflow's filename.
-  publish-python:
-    if: ${{ needs.python.outputs.should-release == 'true' }}
-    needs: [python]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.python.outputs.dist-artifact-name }}
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-        with:
-          attestations: true
-          packages-dir: dist/
-          repository-url: "https://test.pypi.org/legacy/"
-
-  # Publish the npm tarball to npmjs.org via Trusted Publishing (OIDC).
-  publish-npm:
-    if: ${{ needs.npm.outputs.should-release == 'true' }}
-    needs: [npm]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # OIDC for Trusted Publishing
-      contents: read
-    steps:
-      # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
-      # minimum for OIDC publish, and v6 does not inject an empty
-      # NODE_AUTH_TOKEN that would downgrade to legacy token auth.
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.npm.outputs.dist-artifact-name }}
-          path: dist/
-      # `./` prefix is load-bearing: without it npm's package-arg parser
-      # treats `dist/foo.tgz` as a GitHub shorthand instead of a file.
-      # `--tag showcase` keeps these off the package's `latest` and
-      # `integration` dist-tags — the npm fixture is shared with the
-      # integration test (see test-wrangle.yml.template).
-      - name: Publish to npmjs.org
-        env:
-          TARBALL: ${{ needs.npm.outputs.tarball }}
-        run: npm publish "./dist/${TARBALL}" --provenance --tag showcase
-
-  # ----- permanent example artifacts on the GitHub Release -------------
-
-  # Stopgap until wrangle attaches build outputs to the Release itself
-  # (TomHennen/wrangle#228). wrangle's vsa job attaches each build's signed
-  # VSA to the Release (and the provenance lives in GitHub's attestation
-  # store); this job adds the dist + SBOM so the Release is a complete worked
-  # example (TomHennen/wrangle#200), and marks tracking-tag Releases as
-  # pre-releases. Skipped on workflow_dispatch (no tag). Delete once
-  # wrangle#228 ships.
+  # Permanent example artifacts on the GitHub Release. Stopgap until wrangle
+  # attaches build outputs to the Release itself (TomHennen/wrangle#228):
+  # wrangle's vsa job attaches each build's signed VSA (and provenance lives
+  # in GitHub's attestation store); this job adds the python/npm dist + SBOM
+  # so the Release is a complete worked example, and marks tracking-tag
+  # Releases as pre-releases. Skipped on workflow_dispatch (no tag).
   release-assets:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: [python, npm]
@@ -309,16 +313,11 @@ jobs:
           fi
           gh release upload "$TAG" upload/* --clobber
 
-  # Prune old tracking tags + their pre-releases. Tracking tags
-  # accumulate one-per-wrangle-main-push and are only useful as a
-  # heartbeat — a 30-day window keeps "last month of showcase runs"
-  # visible without burying the curated `vX.Y.Z` releases that are the
-  # actual adopter-facing artifacts.
-  #
-  # Filters strictly on the `vYYYYMMDD-<sha7>` tag-name regex AND on
-  # `prerelease: true` so a hand-cut `vX.Y.Z` (full release) is never
-  # touched even if the regex matches by accident. Curated releases are
-  # forever; tracking-tag retention is purely cosmetic.
+  # Prune old tracking tags + their pre-releases. Tracking tags accumulate
+  # one-per-wrangle-main-push and are only useful as a heartbeat — a 30-day
+  # window keeps "last month of showcase runs" visible without burying the
+  # curated `vX.Y.Z` releases. Filters strictly on the `vYYYYMMDD-<sha7>`
+  # regex AND `prerelease: true`, so a hand-cut `vX.Y.Z` is never touched.
   prune-tracking-tags:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs: [release-assets]
