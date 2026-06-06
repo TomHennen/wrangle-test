@@ -19,11 +19,12 @@ name: Showcase
 #     UI) for the stable, clickable example artifacts in wrangle's
 #     adopter-facing docs (TomHennen/wrangle#200).
 #
-# Either way the SLSA generator attaches each build's L3 provenance to
-# the GitHub Release and the release-assets job adds the dist + SBOM.
-# Driving runs through a real tag (not a `schedule:` trigger) is
-# deliberate: wrangle gates provenance-upload-to-Release on
-# refs/tags/*, so only a tag push exercises that path.
+# Either way wrangle's attest job produces each build's L3 provenance
+# (actions/attest-build-provenance, stored in GitHub's attestation store),
+# the vsa job attaches the signed VSA to the GitHub Release, and the
+# release-assets job adds the dist + SBOM. Driving runs through a real tag
+# (not a `schedule:` trigger) is deliberate: wrangle gates the
+# VSA-attach-to-Release on refs/tags/*, so only a tag push exercises it.
 #
 # Unlike the integration template this file is NOT generated and NOT
 # pinned to a per-PR SHA — it lives on `main`.
@@ -120,7 +121,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -128,13 +128,6 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-showcase
       registry: ghcr.io
       release-events: non-pull-request
-      # The SLSA generator sometimes misdetects public repos as private
-      # when the run was triggered by a ref pushed with a non-GITHUB_TOKEN
-      # credential — which every showcase run is (tracking tags are pushed
-      # by wrangle's release-showcase.yml via a PAT; curated tags are
-      # pushed manually). Safe: wrangle-test is public and disposable.
-      # Matches test-wrangle.yml.template.
-      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -147,7 +140,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -156,7 +148,6 @@ jobs:
       registry: ghcr.io
       release-events: non-pull-request
       verify-image: false
-      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -166,9 +157,8 @@ jobs:
   python:
     needs: [prep]
     permissions:
-      contents: write   # SLSA generator's upload-assets job; validated at startup
+      contents: write   # wrangle's vsa job (attach VSA to release); validated at startup
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -184,7 +174,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -199,7 +188,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -216,7 +204,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -291,9 +278,9 @@ jobs:
   # ----- permanent example artifacts on the GitHub Release -------------
 
   # Stopgap until wrangle attaches build outputs to the Release itself
-  # (TomHennen/wrangle#228). The SLSA generator already attaches each
-  # build's L3 provenance (its upload-assets job fires on refs/tags/*);
-  # this job adds the dist + SBOM so the Release is a complete worked
+  # (TomHennen/wrangle#228). wrangle's vsa job attaches each build's signed
+  # VSA to the Release (and the provenance lives in GitHub's attestation
+  # store); this job adds the dist + SBOM so the Release is a complete worked
   # example (TomHennen/wrangle#200), and marks tracking-tag Releases as
   # pre-releases. Skipped on workflow_dispatch (no tag). Delete once
   # wrangle#228 ships.
@@ -334,10 +321,10 @@ jobs:
           if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             create_flags+=(--prerelease)
           fi
-          # The SLSA generator's upload-assets job usually created the
-          # Release already; `|| true` covers the case where it has not.
+          # wrangle's vsa job may have created the Release already (it attaches
+          # the VSA on tag pushes); `|| true` covers the case where it has not.
           gh release create "$TAG" --title "$TAG" \
-            --notes "wrangle-test showcase build — example wrangle outputs (SBOM, SLSA L3 provenance, dist)." \
+            --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
             --verify-tag "${create_flags[@]}" || true
           if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             gh release edit "$TAG" --prerelease

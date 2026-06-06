@@ -23,7 +23,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
     with:
@@ -31,10 +30,6 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-staging
       registry: ghcr.io
       release-events: non-pull-request   # explicit; matches the default
-      # The SLSA generator sometimes misdetects public repos as private
-      # when workflows run on branches pushed by PATs. This is safe —
-      # wrangle-test is intentionally public and disposable.
-      publish_provenance_for_private_repo: true
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -83,7 +78,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
     with:
@@ -97,7 +91,6 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-staging-no-verify
       registry: ghcr.io
       release-events: non-pull-request
-      publish_provenance_for_private_repo: true
       verify-image: false
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
@@ -127,13 +120,12 @@ jobs:
   test-python:
     needs: [prep-python]
     permissions:
-      # Required by wrangle's provenance job (calls slsa-github-generator).
-      # `contents: write` is mandated by the generator's upload-assets job
-      # at startup even when upload-assets is false; matches the SLSA
-      # reference example.
+      # `contents: write` is required by wrangle's vsa job, which attaches the
+      # signed VSA to the GitHub release on tag pushes. GitHub validates a
+      # called job's permissions at startup regardless of the run's ref, so the
+      # caller must grant it even on non-tag integration runs.
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
@@ -149,7 +141,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
@@ -230,13 +221,11 @@ jobs:
   test-npm:
     needs: [prep-npm]
     permissions:
-      # Required by wrangle's nested provenance job (slsa-github-generator).
-      # `contents: write` is mandated by the generator's upload-assets job
-      # at startup even when upload-assets is false; matches the example
-      # in gh_workflow_examples/build_npm.yml.
+      # `contents: write` is required by wrangle's vsa job, which attaches the
+      # signed VSA to the GitHub release on tag pushes; GitHub validates a called
+      # job's permissions at startup, so grant it even on non-tag runs.
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
     with:
@@ -261,7 +250,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@__WRANGLE_SHA__
     with:
@@ -344,9 +332,8 @@ jobs:
   # release runs.
   test-go:
     permissions:
-      contents: write   # SLSA generator's upload-assets job + wrangle's publish job
+      contents: write   # wrangle's publish job (gh release) + vsa job (attach VSA to release)
       id-token: write
-      actions: read
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@__WRANGLE_SHA__
     with:
