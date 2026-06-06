@@ -183,9 +183,8 @@ jobs:
           git commit -m "Set npm test version 0.0.2-integration.${RUN_ID}"
           git push
 
-  # npm fixture — exercises the default (verify-provenance: true) path
-  # through wrangle's reusable workflow: build → SBOM → hash → gate →
-  # provenance → verify. Publish-to-npmjs.org happens in publish-npm
+  # npm fixture — exercises wrangle's reusable workflow end to end: build →
+  # SBOM → hash → gate → provenance → vsa. Publish-to-npmjs.org happens in publish-npm
   # below because npm Trusted Publishing's OIDC `workflow_ref` claim
   # binds to the *caller* workflow's filename — a reusable workflow
   # can't satisfy it.
@@ -205,8 +204,7 @@ jobs:
       release-events: non-pull-request   # explicit; matches the default
 
   # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack
-  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`) plus the
-  # default verify-provenance: true path. Build-only — publish-to-
+  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`). Build-only — publish-to-
   # npmjs.org is already covered by test-npm via the same package name
   # (@tomhennen/wrangle-integration-fixture). Running the publish step
   # twice in one workflow run would race on the `integration` dist-tag
