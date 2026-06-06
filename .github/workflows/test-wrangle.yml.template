@@ -17,7 +17,7 @@ jobs:
     with:
       scan-path: shell
 
-  # Container fixture — exercises the default (verify-image: true) path.
+  # Container fixture — build + provenance + VSA through to the registry.
   test-container:
     permissions:
       contents: read
@@ -69,32 +69,6 @@ jobs:
           jq -e '.predicate.verificationResult == "PASSED"' <<<"$payload"
           jq -e '.predicate.verifiedLevels | index("SLSA_BUILD_LEVEL_3")' <<<"$payload"
 
-  # Container opt-out fixture — exercises verify-image: false. Same
-  # composite, same provenance generation; only wrangle's verify step
-  # is skipped. Catches regressions where the workflow incorrectly
-  # gates something other than the verify job on this input.
-  test-container-no-verify:
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@__WRANGLE_SHA__
-    with:
-      # Distinct path from test-container so the wrangle reusable workflow's
-      # path-derived shortname (and the artifact names that key off it)
-      # don't collide between the two parallel calls. container-no-verify/
-      # is a clone of container/ — same Dockerfile, same app — only the
-      # directory differs. Mirrors how the python fixture pair (python +
-      # python-uv) already uses distinct paths.
-      path: container-no-verify
-      imagename: ghcr.io/tomhennen/wrangle-test-staging-no-verify
-      registry: ghcr.io
-      release-events: non-pull-request
-      verify-image: false
-    secrets:
-      gh_token: ${{ secrets.GITHUB_TOKEN }}
-
   # Patch the Python fixture version to be unique per run so every
   # integration test exercises the full publish-to-TestPyPI path.
   prep-python:
@@ -115,8 +89,7 @@ jobs:
           git commit -m "Set test version 0.0.1.dev${RUN_ID}"
           git push
 
-  # Python fixture — exercises the default (verify-provenance: true)
-  # path AND the publish-to-TestPyPI path.
+  # Python fixture — exercises the build + publish-to-TestPyPI path.
   test-python:
     needs: [prep-python]
     permissions:
@@ -133,10 +106,9 @@ jobs:
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
 
-  # Python opt-out fixture — exercises the uv path AND verify-provenance: false.
-  # Doubles up coverage: catches regressions in the uv tooling branch and in
-  # the verify-opt-out branch in one fixture instead of running two builds.
-  # Build-only (no publish) since publish coverage is in test-python.
+  # Python uv fixture — exercises wrangle's uv tooling branch (distinct from
+  # test-python's pip path). Build-only (no publish) since publish coverage is
+  # in test-python.
   test-python-uv:
     permissions:
       contents: write
@@ -146,7 +118,6 @@ jobs:
     with:
       path: python-uv
       release-events: non-pull-request
-      verify-provenance: false
 
   # Publish to TestPyPI directly (not via reusable workflow) because
   # PyPI Trusted Publishing requires the OIDC token from this workflow.

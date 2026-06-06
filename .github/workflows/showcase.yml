@@ -114,8 +114,8 @@ jobs:
     with:
       scan-path: shell
 
-  # Container fixture — default verify-image: true path. Publishes to
-  # ghcr.io; ghcr needs only GITHUB_TOKEN, no Trusted Publisher.
+  # Container fixture — publishes to ghcr.io; ghcr needs only GITHUB_TOKEN,
+  # no Trusted Publisher.
   container:
     permissions:
       contents: read
@@ -128,26 +128,6 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-showcase
       registry: ghcr.io
       release-events: non-pull-request
-    secrets:
-      gh_token: ${{ secrets.GITHUB_TOKEN }}
-
-  # Container opt-out fixture — exercises verify-image: false so the
-  # showcase covers that branch of the container workflow too. Uses its
-  # own fixture dir (a clone of container/) so the reusable workflow's
-  # path-derived artifact names don't collide with `container`.
-  container-no-verify:
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
-    with:
-      path: container-no-verify
-      imagename: ghcr.io/tomhennen/wrangle-test-showcase-no-verify
-      registry: ghcr.io
-      release-events: non-pull-request
-      verify-image: false
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -166,10 +146,9 @@ jobs:
       ref: showcase-build
       release-events: non-pull-request
 
-  # Python fixture (uv path) — exercises the uv tooling branch AND
-  # verify-provenance: false. Build-only (publish coverage is in the
-  # `python` job above), so it keeps a static version and builds the
-  # triggering commit directly.
+  # Python fixture (uv path) — exercises the uv tooling branch. Build-only
+  # (publish coverage is in the `python` job above), so it keeps a static
+  # version and builds the triggering commit directly.
   python-uv:
     permissions:
       contents: write
@@ -179,7 +158,6 @@ jobs:
     with:
       path: python-uv
       release-events: non-pull-request
-      verify-provenance: false
 
   # npm fixture — build + test (`npm test`) + SLSA L3 provenance +
   # wrangle's own verify. Built from showcase-build for the version bump.
