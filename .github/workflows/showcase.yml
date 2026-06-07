@@ -49,6 +49,8 @@ jobs:
 
   shell:
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: read
     uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
@@ -57,6 +59,8 @@ jobs:
   # Publishes to ghcr.io; ghcr needs only GITHUB_TOKEN, no Trusted Publisher.
   container:
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: read
       packages: write
       id-token: write
@@ -75,6 +79,8 @@ jobs:
   python:
     needs: [prep]
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: write   # wrangle's verify job (attach VSA to release); validated at startup
       id-token: write
       attestations: write
@@ -88,6 +94,8 @@ jobs:
   # static version, builds the triggering commit.
   python-uv:
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: write
       id-token: write
       attestations: write
@@ -101,6 +109,8 @@ jobs:
   npm:
     needs: [prep]
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: write
       id-token: write
       attestations: write
@@ -116,6 +126,8 @@ jobs:
   # the triggering commit.
   pnpm:
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: write
       id-token: write
       attestations: write
@@ -130,6 +142,8 @@ jobs:
   # reuse).
   go:
     permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
       contents: write   # goreleaser creates the Release; wrangle's verify job attaches the VSA
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
