@@ -75,7 +75,7 @@ jobs:
   python:
     needs: [prep]
     permissions:
-      contents: write   # wrangle's vsa job (attach VSA to release); validated at startup
+      contents: write   # wrangle's verify job (attach VSA to release); validated at startup
       id-token: write
       attestations: write
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
@@ -130,7 +130,7 @@ jobs:
   # reuse).
   go:
     permissions:
-      contents: write   # goreleaser creates the Release; wrangle's vsa job attaches the VSA
+      contents: write   # goreleaser creates the Release; wrangle's verify job attaches the VSA
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
@@ -261,14 +261,15 @@ jobs:
           git push --force origin "HEAD:refs/heads/showcase-build"
 
   # Permanent example artifacts on the GitHub Release. Stopgap until wrangle
-  # attaches build outputs to the Release itself (TomHennen/wrangle#228):
-  # wrangle's vsa job attaches each build's signed VSA (and provenance lives
-  # in GitHub's attestation store); this job adds the python/npm dist + SBOM
-  # so the Release is a complete worked example, and marks tracking-tag
-  # Releases as pre-releases. Skipped on workflow_dispatch (no tag).
+  # attaches build outputs to the Release itself (TomHennen/wrangle#228). The
+  # verify jobs emit each build's signed VSA as a workflow artifact (the Release
+  # doesn't exist yet when they run); this job creates the Release and attaches
+  # the python/npm dist + SBOM + every VSA, so it's a complete worked example,
+  # and marks tracking-tag Releases as pre-releases. Skipped on
+  # workflow_dispatch (no tag).
   release-assets:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, npm]
+    needs: [python, npm, go]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create/edit the GitHub Release
@@ -281,6 +282,7 @@ jobs:
       - name: Attach dist + SBOM to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # this job has no checkout; gh needs the repo
           TAG: ${{ github.ref_name }}
           PYTHON_DIST: ${{ needs.python.outputs.dist-artifact-name }}
           PYTHON_META: ${{ needs.python.outputs.metadata-artifact-name }}
@@ -295,6 +297,9 @@ jobs:
           cp "artifacts/${NPM_DIST}"/* upload/
           cp "artifacts/${PYTHON_META}/sbom.spdx.json" upload/python-sbom.spdx.json
           cp "artifacts/${NPM_META}/sbom.spdx.json" upload/npm-sbom.spdx.json
+          # The verify jobs emit each artifact's signed VSA as a workflow
+          # artifact; attach them too so the Release shows the full output set.
+          find artifacts -name '*.intoto.jsonl' -exec cp {} upload/ \;
 
           # Curated `vX.Y.Z` -> full release; tracking `vYYYYMMDD-<sha>`
           # -> pre-release (keeps them out of the "Latest release" badge).
@@ -303,8 +308,8 @@ jobs:
           if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             create_flags+=(--prerelease)
           fi
-          # wrangle's vsa job may have created the Release already (it attaches
-          # the VSA on tag pushes); `|| true` covers the case where it has not.
+          # Create the Release for this tag (goreleaser may have already created
+          # it for the go artifacts); `|| true` makes the create idempotent.
           gh release create "$TAG" --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
             --verify-tag "${create_flags[@]}" || true

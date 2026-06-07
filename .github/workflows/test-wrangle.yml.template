@@ -69,8 +69,9 @@ jobs:
           jq -e '.predicate.verificationResult == "PASSED"' <<<"$payload"
           jq -e '.predicate.verifiedLevels | index("SLSA_BUILD_LEVEL_3")' <<<"$payload"
 
-  # Patch the Python fixture version to be unique per run so every
-  # integration test exercises the full publish-to-TestPyPI path.
+  # Push a version-bump commit before the build so test-python exercises
+  # wrangle's `ref:` input (build a commit pushed after the trigger, the
+  # release-please-style flow), not just the triggering SHA.
   prep-python:
     runs-on: ubuntu-latest
     permissions:
@@ -89,11 +90,12 @@ jobs:
           git commit -m "Set test version 0.0.1.dev${RUN_ID}"
           git push
 
-  # Python fixture — exercises the build + publish-to-TestPyPI path.
+  # Python fixture — build + provenance + verify (via wrangle's reusable
+  # workflow), building the prep-python commit through the `ref:` input.
   test-python:
     needs: [prep-python]
     permissions:
-      # `contents: write` is required by wrangle's vsa job, which attaches the
+      # `contents: write` is required by wrangle's verify job, which attaches the
       # signed VSA to the GitHub release on tag pushes. GitHub validates a
       # called job's permissions at startup regardless of the run's ref, so the
       # caller must grant it even on non-tag integration runs.
@@ -119,43 +121,10 @@ jobs:
       path: python-uv
       release-events: non-pull-request
 
-  # Publish to TestPyPI directly (not via reusable workflow) because
-  # PyPI Trusted Publishing requires the OIDC token from this workflow.
-  # See: https://github.com/pypi/warehouse/issues/11096
-  publish-python:
-    # Mirror the canonical adopter pattern: gate publish on should-release
-    # so wrangle's release-events input controls both wrangle's internal
-    # gating and this publish job. With release-events: non-pull-request,
-    # publish runs on integration/** push events (which is what dispatch
-    # uses) but would not run on PRs.
-    if: ${{ needs.test-python.outputs.should-release == 'true' }}
-    needs: [test-python]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          # The reusable workflow namespaces the artifact name by the
-          # path-derived shortname (see wrangle's build_and_publish_python.yml
-          # outputs). Use the exported name rather than hardcoding.
-          name: ${{ needs.test-python.outputs.dist-artifact-name }}
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-        with:
-          attestations: true
-          packages-dir: dist/
-          repository-url: "https://test.pypi.org/legacy/"
-
-  # Patch the npm fixture version to be unique per run AND mark it as a
-  # pre-release of v0.0.2. The package's `latest` dist-tag on npmjs.org
-  # stays at the bootstrap-published v0.0.1; integration test publishes
-  # land under the `integration` dist-tag (see publish-npm below) so
-  # consumers running `npm install @tomhennen/wrangle-integration-fixture`
-  # never accidentally pick up a per-run test version.
-  #
-  # Runs after prep-python so the two version-bump pushes serialize on
-  # the same integration/** branch instead of racing each other.
+  # Push an npm version-bump commit before the build so test-npm exercises
+  # wrangle's `ref:` input (same purpose as prep-python). Runs after
+  # prep-python so the two version-bump pushes serialize on the same
+  # integration/** branch instead of racing each other.
   prep-npm:
     needs: [prep-python]
     runs-on: ubuntu-latest
@@ -184,14 +153,12 @@ jobs:
           git push
 
   # npm fixture — exercises wrangle's reusable workflow end to end: build →
-  # SBOM → hash → gate → provenance → vsa. Publish-to-npmjs.org happens in publish-npm
-  # below because npm Trusted Publishing's OIDC `workflow_ref` claim
-  # binds to the *caller* workflow's filename — a reusable workflow
-  # can't satisfy it.
+  # SBOM → hash → gate → provenance → verify, building the prep-npm commit
+  # through the `ref:` input.
   test-npm:
     needs: [prep-npm]
     permissions:
-      # `contents: write` is required by wrangle's vsa job, which attaches the
+      # `contents: write` is required by wrangle's verify job, which attaches the
       # signed VSA to the GitHub release on tag pushes; GitHub validates a called
       # job's permissions at startup, so grant it even on non-tag runs.
       contents: write
@@ -204,12 +171,8 @@ jobs:
       release-events: non-pull-request   # explicit; matches the default
 
   # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack
-  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`). Build-only — publish-to-
-  # npmjs.org is already covered by test-npm via the same package name
-  # (@tomhennen/wrangle-integration-fixture). Running the publish step
-  # twice in one workflow run would race on the `integration` dist-tag
-  # version. Mirrors test-python-uv's "double up coverage on one
-  # fixture" pattern.
+  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`). Mirrors
+  # test-python-uv: a second fixture covering an alternate tooling path.
   #
   # No prep-pnpm step: the pnpm/ fixture's version stays at 0.0.1
   # because we never publish it. github.sha (the triggering commit)
@@ -224,67 +187,6 @@ jobs:
     with:
       path: pnpm
       release-events: non-pull-request
-
-  # Publish to npmjs.org via Trusted Publishing (OIDC). Mirrors the
-  # publish-python pattern: gated on should-release, runs in this
-  # caller workflow (not wrangle's reusable workflow) because Trusted
-  # Publishing's OIDC `workflow_ref` claim binds to the caller's
-  # workflow filename.
-  #
-  # CRITICAL: NPM_TOKEN / NODE_AUTH_TOKEN MUST NOT be set anywhere
-  # in this job. A leftover token (e.g., inherited from an org-level
-  # secret reference) would silently bypass the OIDC handshake and
-  # downgrade to legacy token auth — the registry would still accept
-  # the publish, but the `workflow_ref` binding wouldn't be enforced.
-  # The trusted publisher registered on npmjs.com pins to workflow
-  # filename `test-wrangle.yml` (the generated file, not the template).
-  #
-  # `--tag integration` so the bootstrap-published v0.0.1 stays the
-  # `latest` dist-tag on npm; per-run test versions land under
-  # `integration` and don't pollute consumer-facing installs.
-  publish-npm:
-    if: ${{ needs.test-npm.outputs.should-release == 'true' }}
-    needs: [test-npm]
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # OIDC for Trusted Publishing
-      contents: read
-    steps:
-      # setup-node v6 + Node 24 (npm 11) for Trusted Publishing support.
-      # v6 does not auto-export NODE_AUTH_TOKEN, letting npm 11's OIDC
-      # auto-detection work. Node 24 ships npm >= 11.5.1 (the minimum
-      # for Trusted Publishing OIDC auth).
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          # The reusable workflow namespaces the artifact name by the
-          # path-derived shortname (see wrangle's build_and_publish_npm.yml
-          # outputs). Use the exported name rather than hardcoding.
-          name: ${{ needs.test-npm.outputs.dist-artifact-name }}
-          path: dist/
-
-      - name: Publish to npmjs.org with provenance
-        run: |
-          set -euo pipefail
-          # Locate the tarball dynamically — robust against download-artifact
-          # layout variations across major versions.
-          tgz="$(find dist -name '*.tgz' -print -quit)"
-          if [[ -z "$tgz" ]]; then
-            echo "::error::No .tgz found in dist/"
-            find dist -ls >&2
-            exit 1
-          fi
-          printf 'Publishing %s\n' "$tgz"
-          # Prefix with ./ so npm's package-arg parser treats the path as
-          # a filesystem reference, not a GitHub shorthand. Without it,
-          # "dist/foo.tgz" is parsed as owner=dist repo=foo.tgz and npm
-          # attempts `git ls-remote ssh://git@github.com/dist/foo.tgz.git`.
-          npm publish "./$tgz" --provenance --tag integration
 
   # Go fixture — exercises wrangle's Go build pipeline end-to-end.
   # Unlike python and npm, wrangle's Go reusable workflow OWNS publish
@@ -301,7 +203,7 @@ jobs:
   # release runs.
   test-go:
     permissions:
-      contents: write   # wrangle's publish job (gh release) + vsa job (attach VSA to release)
+      contents: write   # wrangle's publish job (gh release) + verify job (attach VSA to release)
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@__WRANGLE_SHA__
