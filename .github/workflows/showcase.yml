@@ -247,12 +247,14 @@ jobs:
             printf 'Curated release: version %s\n' "$VERSION_PART"
           elif [[ "$VERSION_PART" =~ ^([0-9]{8})- ]]; then
             # Tracking tag vYYYYMMDD-<sha> -> PEP 440 dev / SemVer pre-release.
-            # The date alone keys the version; the SHA in the tag is for
-            # traceability on the wrangle side, not for package versions.
+            # wrangle pushes one tag per main commit, so several land per day;
+            # the version must be unique per run, not per day. PEP 440's dev
+            # segment is a single integer (no room for the SHA), so key both
+            # on the run id and keep the date only for the log line.
             DATE="${BASH_REMATCH[1]}"
-            PY_VERSION="0.0.1.dev${DATE}"
-            NPM_VERSION="0.0.1-dev.${DATE}"
-            printf 'Tracking tag: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
+            PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
+            NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
+            printf 'Tracking tag %s: python=%s npm=%s\n' "$DATE" "$PY_VERSION" "$NPM_VERSION"
           else
             # Manual workflow_dispatch — key the dev version by run id.
             PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
