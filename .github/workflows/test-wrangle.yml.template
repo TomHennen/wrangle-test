@@ -18,6 +18,11 @@ jobs:
     uses: TomHennen/wrangle/.github/workflows/build_shell.yml@__WRANGLE_SHA__
     with:
       scan-path: shell
+      # osv cold-compiles from source — the integration's biggest per-job
+      # cost — and is already exercised once (real tool, real SARIF) in
+      # test-scan. zizmor (a prebuilt action) proves each build type's scan
+      # wiring without paying that build. Same rationale on the jobs below.
+      scan-tools: zizmor
 
   # Container fixture — build + provenance + VSA through to the registry.
   test-container:
@@ -34,6 +39,7 @@ jobs:
       imagename: ghcr.io/tomhennen/wrangle-test-staging
       registry: ghcr.io
       release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -113,6 +119,7 @@ jobs:
       path: python
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
 
   # Python uv fixture — exercises wrangle's uv tooling branch (distinct from
   # test-python's pip path). Build-only (no publish) since publish coverage is
@@ -128,6 +135,7 @@ jobs:
     with:
       path: python-uv
       release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
 
   # Push an npm version-bump commit before the build so test-npm exercises
   # wrangle's `ref:` input (same purpose as prep-python). Runs after
@@ -179,6 +187,7 @@ jobs:
       path: npm
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
 
   # Adopter publish-gate path at the PR's wrangle SHA: verify-vsa checks
   # the npm dist against the VSA minted by THIS run. The wrangle-side e2e
@@ -218,6 +227,7 @@ jobs:
     with:
       path: pnpm
       release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
 
   # Go fixture — exercises wrangle's Go build pipeline end-to-end.
   # Unlike python and npm, wrangle's Go reusable workflow OWNS publish
@@ -243,6 +253,7 @@ jobs:
     with:
       path: go
       release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
 
   test-scan:
     permissions:
