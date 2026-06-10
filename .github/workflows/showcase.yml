@@ -181,6 +181,12 @@ jobs:
         with:
           name: ${{ needs.python.outputs.dist-artifact-name }}
           path: dist/
+      # Verify this job's own download against wrangle's signed VSA — the
+      # full policy verdict — before any bytes leave for the registry.
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+        with:
+          path: dist/
+          signer-workflow: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml
       - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           attestations: true
@@ -207,6 +213,12 @@ jobs:
         with:
           name: ${{ needs.npm.outputs.dist-artifact-name }}
           path: dist/
+      # Verify this job's own download against wrangle's signed VSA — the
+      # full policy verdict — before any bytes leave for the registry.
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+        with:
+          path: dist/
+          signer-workflow: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml
       # `./` prefix is load-bearing: without it npm's package-arg parser
       # treats `dist/foo.tgz` as a GitHub shorthand instead of a file.
       # `--tag showcase` keeps these off the package's `latest` and
