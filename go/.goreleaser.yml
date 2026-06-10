@@ -46,3 +46,9 @@ checksum:
 # history to summarize and the integration test doesn't exercise it.
 changelog:
   disable: true
+
+# Re-running one tag's workflow re-uploads the same asset names to that
+# tag's existing Release; without this goreleaser fails the upload with
+# 422 already_exists, so a transient re-run can never go green.
+release:
+  replace_existing_artifacts: true
