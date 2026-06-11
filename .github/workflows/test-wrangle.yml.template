@@ -180,6 +180,25 @@ jobs:
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
 
+  # Adopter publish-gate path at the PR's wrangle SHA: verify-vsa checks
+  # the npm dist against the VSA minted by THIS run. The wrangle-side e2e
+  # job (verify-vsa-action in test.yml) covers only checked-in fixtures, so
+  # this is the fresh-VSA, current-wrangle coverage of the gate.
+  verify-npm-vsa-gate:
+    needs: [test-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read   # download-artifact reads this run's dist + VSA artifacts
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.test-npm.outputs.dist-artifact-name }}
+          path: dist/
+      - uses: TomHennen/wrangle/actions/verify-vsa@__WRANGLE_SHA__
+        with:
+          path: dist/
+          resource-uri: ${{ needs.test-npm.outputs.resource-uri }}
+
   # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack
   # setup, `pnpm install --frozen-lockfile`, `pnpm pack`). Mirrors
   # test-python-uv: a second fixture covering an alternate tooling path.
