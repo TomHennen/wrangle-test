@@ -1,5 +1,17 @@
 version: 2
 updates:
+  # Bumps the `uses:` action + reusable-workflow pins in the showcase /
+  # integration workflows (third-party actions, and the wrangle release-tag pin
+  # once the showcase pins one). No composites here, so "/" covers it.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(actions):"
   - package-ecosystem: "gomod"
     directory: "/scan"
     schedule:
