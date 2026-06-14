@@ -176,6 +176,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
+    # The showcase builds wrangle at @main, so its VSA signer ref is a branch,
+    # not a release tag — run wrangle's verify-vsa gate in non-release dogfood
+    # mode. The shipped default (release tag required) is what real adopters,
+    # who pin a release tag, get.
+    env:
+      WRANGLE_VSA_NON_STRICT: "1"
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -200,6 +206,11 @@ jobs:
     permissions:
       id-token: write   # OIDC for Trusted Publishing
       contents: read
+    # Showcase builds wrangle at @main (branch ref, not a release tag), so run
+    # wrangle's verify-vsa gate in non-release dogfood mode; real adopters pin a
+    # release tag and get the shipped strict default.
+    env:
+      WRANGLE_VSA_NON_STRICT: "1"
     steps:
       # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
       # minimum for OIDC publish, and v6 does not inject an empty
