@@ -1,5 +1,14 @@
 version: 2
 updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps(actions):"
+
   - package-ecosystem: "gomod"
     directory: "/scan"
     schedule:
