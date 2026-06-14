@@ -153,9 +153,15 @@ jobs:
       - name: Stage versions on showcase-release-build
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION_PART="${TAG#v}"
-          if [[ "$VERSION_PART" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Curated tags must be bare semver vX.Y.Z. A suffixed tag
+            # (vX.Y.Z-rc1) also matches showcase.yml's v*-* heartbeat trigger,
+            # so both workflows would fire on it — reject it loudly.
+            VERSION_PART="${GITHUB_REF#refs/tags/v}"
+            if [[ ! "$VERSION_PART" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf 'Curated tags must be bare semver vX.Y.Z (got %s)\n' "${GITHUB_REF#refs/tags/}" >&2
+              exit 1
+            fi
             PY_VERSION="$VERSION_PART"
             NPM_VERSION="$VERSION_PART"
             printf 'Curated release: version %s\n' "$VERSION_PART"
