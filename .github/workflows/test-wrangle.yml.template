@@ -198,6 +198,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read   # download-artifact reads this run's dist + VSA artifacts
+    # The e2e builds wrangle at the PR-head SHA, so the VSA signer ref is a SHA,
+    # not a release tag — run the gate in wrangle's non-release dogfood mode.
+    # The shipped default (release tag required) is what real adopters get.
+    env:
+      WRANGLE_VSA_NON_STRICT: "1"
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
