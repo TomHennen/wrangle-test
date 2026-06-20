@@ -122,9 +122,8 @@ jobs:
       release-events: non-pull-request
 
   # pnpm tooling branch (Corepack, frozen-lockfile, pnpm pack). Build-only:
-  # the pnpm fixture shares the npm fixture's package name, so publishing both
-  # would collide — publish coverage stays in `npm`. Static version, builds
-  # the triggering commit.
+  # publish coverage for the npm ecosystem stays in `npm`. Static version,
+  # builds the triggering commit.
   pnpm:
     needs: [create-release]
     permissions:
