@@ -52,3 +52,6 @@ changelog:
 # 422 already_exists, so a transient re-run can never go green.
 release:
   replace_existing_artifacts: true
+  # The showcase creates the Release as a draft up front; keep it draft so go
+  # artifacts append to it rather than publishing early. finalize-release publishes.
+  draft: true
