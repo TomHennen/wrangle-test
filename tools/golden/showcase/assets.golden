@@ -7,10 +7,12 @@ checksums.txt
 go-metadata-go.zip
 npm-metadata-npm.zip
 npm-metadata-pnpm.zip
+python-metadata-python-pip.zip
 python-metadata-python-uv.zip
-python-metadata-python.zip
 tomhennen-wrangle-integration-fixture-<VER>.tgz
 tomhennen-wrangle-integration-fixture-<VER>.tgz.intoto.jsonl
+wrangle-pnpm-fixture-<VER>.tgz
+wrangle-pnpm-fixture-<VER>.tgz.intoto.jsonl
 wrangle-test-fixture-go_<TAG>_linux_amd64.tar.gz
 wrangle-test-fixture-go_<TAG>_linux_amd64.tar.gz.intoto.jsonl
 wrangle_test_fixture-<VER>.tar.gz

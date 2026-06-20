@@ -340,7 +340,7 @@ jobs:
   # (osv/zizmor/wrangle-lint), so it checks the fuller `showcase` golden.
   golden:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, python-uv, npm, pnpm, go]
+    needs: [python-pip, python-uv, npm, pnpm, go]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # gh release download (read the assembled release)
