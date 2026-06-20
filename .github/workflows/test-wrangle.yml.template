@@ -40,6 +40,8 @@ jobs:
       registry: ghcr.io
       release-events: non-pull-request   # explicit; matches the default
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-container-v1.hjson
     secrets:
       gh_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -120,6 +122,8 @@ jobs:
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-python-v1.hjson
 
   # Python uv fixture — exercises wrangle's uv tooling branch (distinct from
   # test-python's pip path). Build-only (no publish) since publish coverage is
@@ -136,6 +140,8 @@ jobs:
       path: python-uv
       release-events: non-pull-request
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-python-v1.hjson
 
   # Push an npm version-bump commit before the build so test-npm exercises
   # wrangle's `ref:` input (same purpose as prep-python). Runs after
@@ -188,6 +194,8 @@ jobs:
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-npm-v1.hjson
 
   # Adopter publish-gate path at the PR's wrangle SHA: verify-vsa checks
   # the npm dist against the VSA minted by THIS run. The wrangle-side e2e
@@ -233,6 +241,8 @@ jobs:
       path: pnpm
       release-events: non-pull-request
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-npm-v1.hjson
 
   # Go fixture — exercises wrangle's Go build pipeline end-to-end.
   # Unlike python and npm, wrangle's Go reusable workflow OWNS publish
@@ -259,6 +269,8 @@ jobs:
       path: go
       release-events: non-pull-request
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-go-v1.hjson
 
   test-scan:
     permissions:
