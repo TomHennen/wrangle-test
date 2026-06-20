@@ -18,7 +18,7 @@ name: Showcase
 # gh_workflow_examples/ template — the part an adopter copies), the adopter-
 # owned registry-publish jobs (separate because Trusted Publishing binds the
 # OIDC token to the caller workflow's filename), and the showcase harness
-# (prep / release-assets / prune-tracking-tags) — test plumbing that exists
+# (prep / create-draft-release / finalize-release / prune-tracking-tags) — test plumbing that exists
 # only because one repo runs every ecosystem off one tag, publishes to
 # registries that reject version reuse, and accumulates tracking tags to
 # prune. Ignore the harness when reading for "how do I use wrangle for X".
@@ -77,7 +77,7 @@ jobs:
   # PEP 517 build + pytest + SLSA L3 provenance + verify. Built from the
   # showcase-build branch for prep's per-run version bump (see harness below).
   python:
-    needs: [prep]
+    needs: [prep, create-draft-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -93,6 +93,7 @@ jobs:
   # uv tooling branch. Build-only (publish coverage is in `python`), so
   # static version, builds the triggering commit.
   python-uv:
+    needs: [create-draft-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -107,7 +108,7 @@ jobs:
   # npm ci + npm test + npm pack + SLSA L3 provenance + verify. Built from
   # showcase-build for prep's version bump (see harness below).
   npm:
-    needs: [prep]
+    needs: [prep, create-draft-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -125,6 +126,7 @@ jobs:
   # would collide — publish coverage stays in `npm`. Static version, builds
   # the triggering commit.
   pnpm:
+    needs: [create-draft-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -141,6 +143,7 @@ jobs:
   # separate publish-go job and no version bump (GitHub Releases don't reject
   # reuse).
   go:
+    needs: [create-draft-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -299,47 +302,25 @@ jobs:
           # git won't auto-qualify if the remote branch doesn't yet exist.
           git push --force origin "HEAD:refs/heads/showcase-build"
 
-  # Permanent example artifacts on the GitHub Release. Stopgap until wrangle
-  # attaches build outputs to the Release itself (TomHennen/wrangle#228). The
-  # verify jobs emit each build's signed VSA as a workflow artifact (the Release
-  # doesn't exist yet when they run); this job creates the Release and attaches
-  # the python/npm dist + SBOM + every VSA, so it's a complete worked example,
-  # and marks tracking-tag Releases as pre-releases. Skipped on
-  # workflow_dispatch (no tag).
-  release-assets:
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, npm, go]
+  # Create the Release as a draft up front so wrangle's verify jobs have a
+  # Release to attach the rationalized asset set to — wrangle owns the uploads
+  # now (TomHennen/wrangle#228, #501), and its attach no-ops when no Release
+  # exists. Tracking tags are marked pre-release here; finalize-release just
+  # publishes the draft. Runs on every event (no-op off a tag) so it's a safe
+  # `needs:` for the build jobs.
+  create-draft-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create/edit the GitHub Release
+      contents: write   # create the draft Release
     steps:
-      # One download of every run artifact; each lands under
-      # artifacts/<artifact-name>/.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
-      - name: Attach dist + SBOM to the release
+      - name: Create draft Release for the tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}   # this job has no checkout; gh needs the repo
           TAG: ${{ github.ref_name }}
-          PYTHON_DIST: ${{ needs.python.outputs.dist-artifact-name }}
-          PYTHON_META: ${{ needs.python.outputs.metadata-artifact-name }}
-          NPM_DIST: ${{ needs.npm.outputs.dist-artifact-name }}
-          NPM_META: ${{ needs.npm.outputs.metadata-artifact-name }}
         run: |
           set -euo pipefail
-          mkdir -p upload
-          # dist filenames carry package name + version (unique); SBOMs are
-          # all `sbom.spdx.json`, so prefix them by build type.
-          cp "artifacts/${PYTHON_DIST}"/* upload/
-          cp "artifacts/${NPM_DIST}"/* upload/
-          cp "artifacts/${PYTHON_META}/sbom.spdx.json" upload/python-sbom.spdx.json
-          cp "artifacts/${NPM_META}/sbom.spdx.json" upload/npm-sbom.spdx.json
-          # The verify jobs emit each artifact's signed VSA as a workflow
-          # artifact; attach them too so the Release shows the full output set.
-          find artifacts -name '*.intoto.jsonl' -exec cp {} upload/ \;
-
           # Curated `vX.Y.Z` -> full release; tracking `vYYYYMMDD-<sha>`
           # -> pre-release (keeps them out of the "Latest release" badge).
           create_flags=()
@@ -347,15 +328,28 @@ jobs:
           if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             create_flags+=(--prerelease)
           fi
-          # Create the Release for this tag (goreleaser may have already created
-          # it for the go artifacts); `|| true` makes the create idempotent.
-          gh release create "$TAG" --title "$TAG" \
+          # `|| true` keeps a re-run idempotent (the draft already exists).
+          gh release create "$TAG" --draft --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
             --verify-tag "${create_flags[@]}" || true
-          if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            gh release edit "$TAG" --prerelease
-          fi
-          gh release upload "$TAG" upload/* --clobber
+
+  # Publish the draft once every Release-attaching build has uploaded its
+  # rationalized asset set. Skipped on workflow_dispatch (no tag).
+  finalize-release:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [python, python-uv, npm, pnpm, go]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # publish the Release
+    steps:
+      - name: Publish the draft Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # this job has no checkout; gh needs the repo
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false
 
   # Prune old tracking tags + their pre-releases. Tracking tags accumulate
   # one-per-wrangle-main-push and are only useful as a heartbeat — a 30-day
@@ -364,7 +358,7 @@ jobs:
   # regex AND `prerelease: true`, so a hand-cut `vX.Y.Z` is never touched.
   prune-tracking-tags:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [release-assets]
+    needs: [finalize-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # delete tags + releases
