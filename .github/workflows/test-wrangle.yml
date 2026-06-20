@@ -1,0 +1,267 @@
+name: Test Wrangle
+
+# Generated per wrangle PR by the dispatch script, which substitutes
+# 4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec with the PR's head SHA. This file is a template —
+# the .template suffix prevents GitHub Actions from discovering it.
+# See: https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md
+#
+# Triggered by a temp tag `pr-<wrangle-pr>-<wrangle-run-id>` the dispatch
+# pushes (not a branch): a tag run is the only context where github.ref_type
+# is `tag`, which is what gates wrangle's release-asset attach and go's
+# goreleaser publish — the assembled release the golden job asserts against.
+# The temp tag is reaped by cleanup-integration.yml (`pr-<n>-<runid>`).
+
+on:
+  push:
+    tags: ["pr-*"]
+
+jobs:
+  # Create the Release up front so wrangle's verify jobs (and goreleaser) have
+  # one to attach the rationalized asset set to — wrangle's attach no-ops when
+  # no Release exists, and its by-tag lookup does not return drafts, so it must
+  # be published. Pre-release keeps temp tags out of any "Latest release" view.
+  # Mirrors showcase.yml's create-release; the build jobs `needs:` it.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the Release
+    steps:
+      - name: Create the temp Release for this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # no checkout; gh needs the repo
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # `|| true` keeps a re-run idempotent (the Release already exists).
+          gh release create "$TAG" --title "$TAG" \
+            --notes "wrangle per-PR integration build — temp release, reaped by cleanup-integration.yml." \
+            --verify-tag --prerelease || true
+
+  test-shell:
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: read
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      scan-path: shell
+      # osv cold-compiles from source — the integration's biggest per-job
+      # cost — and is already exercised once (real tool, real SARIF) in
+      # test-scan. zizmor (a prebuilt action) proves each build type's scan
+      # wiring without paying that build. Same rationale on the jobs below.
+      scan-tools: zizmor
+
+  # Container fixture — build + provenance + VSA through to the registry.
+  test-container:
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-staging
+      registry: ghcr.io
+      release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-container-v1.hjson
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Regression backstop for the container VSA consumer command. The container
+  # VSA is an OCI 1.1 referrer (not the .att-tag SLSA provenance), and only
+  # cosign v3's verify-attestation reads it; the fixture-based consumer test in
+  # wrangle can't exercise that (it needs a live registry referrer), so the
+  # check lives here, run against the freshly pushed image. No registry auth:
+  # the staging image and Sigstore are public, so cosign verifies anonymously.
+  verify-container-vsa:
+    needs: [test-container]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify the container VSA referrer (origin-repo bound)
+        env:
+          IMAGE_REF: ${{ needs.test-container.outputs.imagename }}@${{ needs.test-container.outputs.digest }}
+          EXPECTED_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Match the workflow SAN; the temp tag is not a release `vX.Y.Z`, so
+          # don't impose the README's @refs/tags/v release constraint.
+          cosign verify-attestation \
+            --type https://slsa.dev/verification_summary/v1 \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/TomHennen/wrangle/\.github/workflows/build_and_publish_container\.yml@' \
+            --certificate-github-workflow-repository "$EXPECTED_REPO" \
+            "$IMAGE_REF" > vsa.json
+      - name: Decode the verified VSA predicate
+        env:
+          EXPECTED_DIGEST: ${{ needs.test-container.outputs.digest }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -r '.payload' vsa.json | base64 -d)"
+          jq -e ".subject[0].digest.sha256 == \"${EXPECTED_DIGEST#sha256:}\"" <<<"$payload"
+          jq -e '.predicate.verificationResult == "PASSED"' <<<"$payload"
+          jq -e '.predicate.verifiedLevels | index("SLSA_BUILD_LEVEL_3")' <<<"$payload"
+
+  # Python fixture — build + provenance + verify, attaching the dist + bundle
+  # + metadata zip to the temp Release. Builds the tagged commit directly; the
+  # `ref:`-input path (build a commit pushed after the trigger) is covered by
+  # the showcase.
+  test-python:
+    needs: [create-release]
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write   # wrangle's verify job attaches the asset set to the Release
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: python
+      release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-python-v1.hjson
+
+  # Python uv fixture — exercises wrangle's uv tooling branch (distinct from
+  # test-python's pip path).
+  test-python-uv:
+    needs: [create-release]
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: python-uv
+      release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-python-v1.hjson
+
+  # npm fixture — exercises wrangle's reusable workflow end to end: build →
+  # SBOM → hash → gate → provenance → verify, attaching to the temp Release.
+  test-npm:
+    needs: [create-release]
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write   # wrangle's verify job attaches the asset set to the Release
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: npm
+      release-events: non-pull-request   # explicit; matches the default
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-npm-v1.hjson
+
+  # Adopter publish-gate path at the PR's wrangle SHA: verify-vsa checks
+  # the npm dist against the VSA minted by THIS run. The wrangle-side e2e
+  # job (verify-vsa-action in test.yml) covers only checked-in fixtures, so
+  # this is the fresh-VSA, current-wrangle coverage of the gate.
+  verify-npm-vsa-gate:
+    needs: [test-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read   # download-artifact reads this run's dist + VSA artifacts
+    # The e2e builds wrangle at the PR-head SHA, so the VSA signer ref is a SHA,
+    # not a release tag — run the gate in wrangle's non-release dogfood mode.
+    # The shipped default (release tag required) is what real adopters get.
+    env:
+      WRANGLE_VSA_NON_STRICT: "1"
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.test-npm.outputs.dist-artifact-name }}
+          path: dist/
+      - uses: TomHennen/wrangle/actions/verify-vsa@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+        with:
+          path: dist/
+          resource-uri: ${{ needs.test-npm.outputs.resource-uri }}
+
+  # pnpm fixture — exercises wrangle's pnpm tooling branch (Corepack
+  # setup, `pnpm install --frozen-lockfile`, `pnpm pack`). Mirrors
+  # test-python-uv: a second fixture covering an alternate tooling path.
+  test-pnpm:
+    needs: [create-release]
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: pnpm
+      release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-npm-v1.hjson
+
+  # Go fixture — exercises wrangle's Go build pipeline end-to-end. wrangle's
+  # Go reusable workflow OWNS publish (the publish target is GitHub Releases,
+  # gated on refs/tags/*); on this temp-tag run goreleaser publishes the go
+  # archive + checksums.txt to the temp Release, then wrangle's verify job
+  # attaches the bundle + metadata zip.
+  test-go:
+    needs: [create-release]
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write   # wrangle's publish job (gh release) + verify job (attach VSA to release)
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: go
+      release-events: non-pull-request
+      scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
+      # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
+      policy: policies/wrangle-provenance-go-v1.hjson
+
+  test-scan:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      # Scorecard requires the default branch; integration/* branches can't use it.
+      # See: https://github.com/ossf/scorecard-action#workflow-restrictions
+      tools: "osv zizmor"
+
+  # Golden-set assertion over the assembled temp Release: the rationalized
+  # asset set and each bundle's predicate types must match the integration
+  # config's checked-in goldens. Drift fails this job → the wrangle PR's
+  # dispatch check. Catches a silently no-op'd asset attach (#501) and a
+  # missing scan attestation (#492) on the PR that introduces it. The
+  # integration config runs scan-tools: zizmor, so it checks the integration
+  # golden (1x scan/v1, vs the showcase's 3x).
+  golden:
+    needs: [test-python, test-python-uv, test-npm, test-pnpm, test-go]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # gh release download (read the assembled release)
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Assert release assets + bundle predicates match the integration golden
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tools/golden/check_golden.sh assets     tools/golden/integration "$TAG"
+          tools/golden/check_golden.sh predicates tools/golden/integration "$TAG"
