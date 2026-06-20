@@ -1,7 +1,9 @@
 name: Cleanup Integration Branches
 
 # Janitor: deletes stale integration/* branches that leaked from
-# canceled or crashed wrangle dispatch runs.
+# canceled or crashed wrangle dispatch runs, and reaps temp per-PR
+# integration tags + releases (pr-<n>-<runid>) older than KEEP_DAYS —
+# recent ones stay for inspecting what a run produced.
 # See: https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md
 
 on:
@@ -59,3 +61,49 @@ jobs:
           done <<< "$BRANCHES"
 
           printf 'Deleted %d stale integration branch(es).\n' "$DELETED"
+
+      - name: Reap temp integration tags + releases older than KEEP_DAYS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          KEEP_DAYS: "7"
+        run: |
+          set -euo pipefail
+
+          CUTOFF_EPOCH=$(( $(date -u +%s) - KEEP_DAYS * 86400 ))
+          printf 'Reaping pr-<n>-<runid> tags + releases older than %s day(s)\n' "$KEEP_DAYS"
+
+          # All refs under the temp-tag prefix, in one paginated call.
+          gh api --paginate "repos/${GH_REPO}/git/matching-refs/tags/pr-" \
+            --jq '.[].ref' | while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            tag="${ref#refs/tags/}"
+            # Strict temp-tag shape: pr-<pr-number>-<run-id>, both numeric.
+            # Anything else under refs/tags/pr- is left alone.
+            [[ "$tag" =~ ^pr-[0-9]+-[0-9]+$ ]] || continue
+
+            # Age from the Release creation date when there is one, else the
+            # tagged commit date — the temp tag carries no date in its name.
+            created="$(gh api "repos/${GH_REPO}/releases/tags/${tag}" \
+              --jq '.created_at' 2>/dev/null || true)"
+            if [[ -z "$created" ]]; then
+              sha="$(gh api "repos/${GH_REPO}/git/${ref}" --jq '.object.sha' 2>/dev/null || true)"
+              [[ -n "$sha" ]] && created="$(gh api "repos/${GH_REPO}/commits/${sha}" \
+                --jq '.commit.committer.date' 2>/dev/null || true)"
+            fi
+            if [[ -z "$created" ]]; then
+              printf 'WARNING: no date for %s, skipping\n' "$tag"
+              continue
+            fi
+
+            created_epoch="$(date -u -d "$created" +%s 2>/dev/null || true)"
+            [[ -n "$created_epoch" ]] || { printf 'WARNING: unparseable date for %s, skipping\n' "$tag"; continue; }
+            (( created_epoch < CUTOFF_EPOCH )) || continue
+
+            printf 'Reaping %s (created %s)\n' "$tag" "$created"
+            # --cleanup-tag drops the Release and tag together; fall back to
+            # deleting the bare ref when there is no Release.
+            gh release delete "$tag" --yes --cleanup-tag 2>/dev/null \
+              || gh api -X DELETE "repos/${GH_REPO}/git/${ref}" 2>/dev/null \
+              || printf 'WARNING: could not reap %s\n' "$tag"
+          done
