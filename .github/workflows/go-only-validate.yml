@@ -1,0 +1,32 @@
+name: Go Only Validate
+on:
+  push:
+    tags: ["v0.0.0-pr.*"]
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create temp release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --title "$TAG" --notes "go-only validate" --verify-tag --prerelease || true
+  test-go:
+    needs: [create-release]
+    permissions:
+      actions: read
+      security-events: write
+      contents: write
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@4ddfe76c4538cfb9d9101745e2b0ec8b2aadcaec
+    with:
+      path: go
+      release-events: non-pull-request
+      scan-tools: zizmor
+      policy: policies/wrangle-provenance-go-v1.hjson
