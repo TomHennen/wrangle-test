@@ -18,7 +18,7 @@ name: Showcase
 # gh_workflow_examples/ template — the part an adopter copies), the adopter-
 # owned registry-publish jobs (separate because Trusted Publishing binds the
 # OIDC token to the caller workflow's filename), and the showcase harness
-# (prep / create-draft-release / finalize-release / prune-tracking-tags) — test plumbing that exists
+# (prep / create-release / prune-tracking-tags) — test plumbing that exists
 # only because one repo runs every ecosystem off one tag, publishes to
 # registries that reject version reuse, and accumulates tracking tags to
 # prune. Ignore the harness when reading for "how do I use wrangle for X".
@@ -77,7 +77,7 @@ jobs:
   # PEP 517 build + pytest + SLSA L3 provenance + verify. Built from the
   # showcase-build branch for prep's per-run version bump (see harness below).
   python:
-    needs: [prep, create-draft-release]
+    needs: [prep, create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -93,7 +93,7 @@ jobs:
   # uv tooling branch. Build-only (publish coverage is in `python`), so
   # static version, builds the triggering commit.
   python-uv:
-    needs: [create-draft-release]
+    needs: [create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -108,7 +108,7 @@ jobs:
   # npm ci + npm test + npm pack + SLSA L3 provenance + verify. Built from
   # showcase-build for prep's version bump (see harness below).
   npm:
-    needs: [prep, create-draft-release]
+    needs: [prep, create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -126,7 +126,7 @@ jobs:
   # would collide — publish coverage stays in `npm`. Static version, builds
   # the triggering commit.
   pnpm:
-    needs: [create-draft-release]
+    needs: [create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -143,7 +143,7 @@ jobs:
   # separate publish-go job and no version bump (GitHub Releases don't reject
   # reuse).
   go:
-    needs: [create-draft-release]
+    needs: [create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -302,18 +302,19 @@ jobs:
           # git won't auto-qualify if the remote branch doesn't yet exist.
           git push --force origin "HEAD:refs/heads/showcase-build"
 
-  # Create the Release as a draft up front so wrangle's verify jobs have a
-  # Release to attach the rationalized asset set to — wrangle owns the uploads
-  # now (TomHennen/wrangle#228, #501), and its attach no-ops when no Release
-  # exists. Tracking tags are marked pre-release here; finalize-release just
-  # publishes the draft. Runs on every event (no-op off a tag) so it's a safe
-  # `needs:` for the build jobs.
-  create-draft-release:
+  # Create the Release up front so wrangle's verify jobs have one to attach the
+  # rationalized asset set to — wrangle owns the uploads now (TomHennen/wrangle
+  # #228, #501), and its attach no-ops when no Release exists. Published, not a
+  # draft: GitHub's by-tag release endpoint (what wrangle's `gh release view
+  # <tag>` / `gh release upload <tag>` use) does not return drafts, so a draft
+  # would be invisible to the attach. Runs on every event (no-op off a tag) so
+  # it's a safe `needs:` for the build jobs.
+  create-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create the draft Release
+      contents: write   # create the Release
     steps:
-      - name: Create draft Release for the tag
+      - name: Create Release for the tag
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -328,28 +329,10 @@ jobs:
           if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             create_flags+=(--prerelease)
           fi
-          # `|| true` keeps a re-run idempotent (the draft already exists).
-          gh release create "$TAG" --draft --title "$TAG" \
+          # `|| true` keeps a re-run idempotent (the Release already exists).
+          gh release create "$TAG" --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
             --verify-tag "${create_flags[@]}" || true
-
-  # Publish the draft once every Release-attaching build has uploaded its
-  # rationalized asset set. Skipped on workflow_dispatch (no tag).
-  finalize-release:
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, python-uv, npm, pnpm, go]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write   # publish the Release
-    steps:
-      - name: Publish the draft Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}   # this job has no checkout; gh needs the repo
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          gh release edit "$TAG" --draft=false
 
   # Prune old tracking tags + their pre-releases. Tracking tags accumulate
   # one-per-wrangle-main-push and are only useful as a heartbeat — a 30-day
@@ -358,7 +341,7 @@ jobs:
   # regex AND `prerelease: true`, so a hand-cut `vX.Y.Z` is never touched.
   prune-tracking-tags:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [finalize-release]
+    needs: [python, python-uv, npm, pnpm, go]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # delete tags + releases
