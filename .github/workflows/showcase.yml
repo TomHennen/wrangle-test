@@ -334,6 +334,31 @@ jobs:
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
             --verify-tag "${create_flags[@]}" || true
 
+  # Golden-set assertion over the assembled release: the rationalized asset
+  # set and each bundle's predicate types must match the showcase config's
+  # checked-in goldens. Catches a silently no-op'd asset attach (#501) and a
+  # missing scan attestation (#492). The showcase runs the default scan tools
+  # (osv/zizmor/wrangle-lint), so it checks the fuller `showcase` golden.
+  golden:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [python, python-uv, npm, pnpm, go]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # gh release download (read the assembled release)
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Assert release assets + bundle predicates match the showcase golden
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tools/golden/check_golden.sh assets     tools/golden/showcase "$TAG"
+          tools/golden/check_golden.sh predicates tools/golden/showcase "$TAG"
+
   # Prune old tracking tags + their pre-releases. Tracking tags accumulate
   # one-per-wrangle-main-push and are only useful as a heartbeat — a 30-day
   # window keeps "last month of showcase runs" visible without burying the
