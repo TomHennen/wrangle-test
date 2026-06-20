@@ -56,18 +56,33 @@ EOF
 
 # --- bundle_multiset ---
 
-@test "bundle_multiset counts integration-config predicate types (1 scan)" {
+@test "bundle_multiset keys integration-config scan/v1 by tool name (zizmor)" {
     run bundle_multiset "${DIR}/testdata/bundle_integration.intoto.jsonl"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"1 https://github.com/TomHennen/wrangle/attestation/scan/v1"* ]]
+    [[ "$output" == *"1 https://github.com/TomHennen/wrangle/attestation/scan/v1[zizmor]"* ]]
     [[ "$output" == *"1 https://slsa.dev/provenance/v1"* ]]
     [[ "$output" == *"1 https://spdx.dev/Document"* ]]
 }
 
-@test "bundle_multiset counts showcase-config predicate types (3 scan)" {
+@test "bundle_multiset keys showcase-config scan/v1 by tool name (3 distinct tools)" {
     run bundle_multiset "${DIR}/testdata/bundle_showcase.intoto.jsonl"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"3 https://github.com/TomHennen/wrangle/attestation/scan/v1"* ]]
+    [[ "$output" == *"1 https://github.com/TomHennen/wrangle/attestation/scan/v1[osv-scanner]"* ]]
+    [[ "$output" == *"1 https://github.com/TomHennen/wrangle/attestation/scan/v1[wrangle-lint]"* ]]
+    [[ "$output" == *"1 https://github.com/TomHennen/wrangle/attestation/scan/v1[zizmor]"* ]]
+}
+
+# The #492 false-green: a tool's attestation goes missing while a duplicate of
+# another appears. The bare scan/v1 count stays 3, so the old count-only golden
+# stayed green; tool-keying surfaces the swap (osv x2, no zizmor).
+@test "bundle_multiset surfaces a missing scan tool masked by a duplicate (#492)" {
+    run bundle_multiset "${DIR}/testdata/bundle_missing_tool.intoto.jsonl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"2 https://github.com/TomHennen/wrangle/attestation/scan/v1[osv-scanner]"* ]]
+    [[ "$output" != *"[zizmor]"* ]]
+    run compare_or_update "$(bundle_multiset "${DIR}/testdata/bundle_missing_tool.intoto.jsonl")" \
+        "${DIR}/showcase/predicates.golden" "" predicate "update-cmd"
+    [ "$status" -eq 1 ]
 }
 
 @test "bundle_multiset reads the dsseEnvelope.payload fallback" {
@@ -101,4 +116,38 @@ EOF
 @test "compare fails when the golden file is missing" {
     run compare_or_update "$(printf 'x')" "/nonexistent/path.golden" "" label "update-cmd"
     [ "$status" -eq 2 ]
+}
+
+# --- header-block explainer support ---
+
+@test "compare ignores leading # header and blank lines on both sides" {
+    tmp="$(mktemp)"; printf '# explainer line\n# another\n\na\nb\n' > "$tmp"
+    run compare_or_update "$(printf '# different note\na\nb')" "$tmp" "" label "update-cmd"
+    [ "$status" -eq 0 ]
+}
+
+@test "compare still drifts on a body change despite matching headers" {
+    tmp="$(mktemp)"; printf '# h\na\nb\n' > "$tmp"
+    run compare_or_update "$(printf '# h\na\nc')" "$tmp" "" label "the-update-cmd"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the-update-cmd"* ]]
+}
+
+@test "--update preserves the leading header block and regenerates the body" {
+    tmp="$(mktemp)"; printf '# keep me\n# line two\nold\n' > "$tmp"
+    run compare_or_update "$(printf 'new1\nnew2')" "$tmp" "--update" label "update-cmd"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$tmp")" = "$(printf '# keep me\n# line two\nnew1\nnew2')" ]
+}
+
+@test "the checked-in showcase predicates golden matches its fixture" {
+    run compare_or_update "$(bundle_multiset "${DIR}/testdata/bundle_showcase.intoto.jsonl")" \
+        "${DIR}/showcase/predicates.golden" "" predicate "update-cmd"
+    [ "$status" -eq 0 ]
+}
+
+@test "the checked-in integration predicates golden matches its fixture" {
+    run compare_or_update "$(bundle_multiset "${DIR}/testdata/bundle_integration.intoto.jsonl")" \
+        "${DIR}/integration/predicates.golden" "" predicate "update-cmd"
+    [ "$status" -eq 0 ]
 }

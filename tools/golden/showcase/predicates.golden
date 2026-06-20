@@ -1,0 +1,9 @@
+# Predicate-type multiset every bundle in the showcase release must carry.
+# scan/v1 is keyed by tool name so a missing/duplicated scan tool drifts (#492).
+# Showcase config runs the default scan tools: osv-scanner, zizmor, wrangle-lint.
+1 https://github.com/TomHennen/wrangle/attestation/scan/v1[osv-scanner]
+1 https://github.com/TomHennen/wrangle/attestation/scan/v1[wrangle-lint]
+1 https://github.com/TomHennen/wrangle/attestation/scan/v1[zizmor]
+1 https://slsa.dev/provenance/v1
+1 https://slsa.dev/verification_summary/v1
+1 https://spdx.dev/Document

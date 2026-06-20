@@ -12,30 +12,33 @@ attestation bundles, then fail on any drift from a checked-in golden.
   go's `checksums.txt`. Per-run-variable parts (package version → `<VER>`, go's
   embedded tag → `<TAG>`) are normalized, so the golden pins the *shape* and
   catches a missing metadata zip, an orphan bundle, or a reappearing flat SBOM.
-- **Bundle predicates** (`bundles.golden`) — the predicate-type multiset every
+- **Predicates** (`predicates.golden`) — the predicate-type multiset every
   bundle must carry: provenance + VSA + SBOM + one `scan/v1` per scan tool that
-  ran. Asserted per bundle, so a missing scan attestation fails even when other
-  bundles still carry it.
+  ran, each keyed by tool name (`scan/v1[<tool>]`). Asserted per bundle, so a
+  missing scan attestation — or a tool swapped for a duplicate of another —
+  fails even when other bundles still carry it.
 
 ## Configs
 
-The bundle golden is config-aware — the scan-tools set decides the `scan/v1`
-count. There is one golden dir per config:
+The predicate golden is config-aware — the scan-tools set decides which
+`scan/v1[<tool>]` lines appear. There is one golden dir per config:
 
-- `showcase/` — the showcase's default scan tools (osv/zizmor/wrangle-lint →
-  3× `scan/v1`). Checked in `showcase.yml`.
-- `integration/` — the per-PR integration config (`scan-tools: zizmor` →
-  1× `scan/v1`).
+- `showcase/` — the showcase's default scan tools (osv-scanner/zizmor/
+  wrangle-lint). Checked in `showcase.yml`.
+- `integration/` — the per-PR integration config (`scan-tools: zizmor`).
+
+The asset set does not vary by config, so `integration/assets.golden` and
+`showcase/assets.golden` are byte-identical by design.
 
 ## Run / update
 
 ```sh
 # Assert (exit 1 on drift, with a diff + this command):
-tools/golden/check_golden.sh assets  tools/golden/showcase <release-tag>
-tools/golden/check_golden.sh bundles tools/golden/showcase <release-tag>
+tools/golden/check_golden.sh assets     tools/golden/showcase <release-tag>
+tools/golden/check_golden.sh predicates tools/golden/showcase <release-tag>
 
-# Regenerate after an intended change:
-tools/golden/check_golden.sh assets  tools/golden/showcase <release-tag> --update
+# Regenerate after an intended change (the leading `#` header is preserved):
+tools/golden/check_golden.sh assets     tools/golden/showcase <release-tag> --update
 ```
 
 `gh` reads the release, so `GH_TOKEN` / `GH_REPO` must be set as `gh` expects.

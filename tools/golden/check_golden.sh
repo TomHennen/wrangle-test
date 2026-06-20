@@ -8,10 +8,10 @@ set -f
 # scan attestation) fails the check with a diff and the regenerate command.
 #
 # Usage:
-#   check_golden.sh assets  <golden-dir> <release-tag> [--update]
-#   check_golden.sh bundles <golden-dir> <release-tag> [--update]
+#   check_golden.sh assets     <golden-dir> <release-tag> [--update]
+#   check_golden.sh predicates <golden-dir> <release-tag> [--update]
 #
-# <golden-dir> holds assets.golden and bundles.golden for one config (the
+# <golden-dir> holds assets.golden and predicates.golden for one config (the
 # integration config and the showcase config each get their own dir). The
 # release's assets are downloaded with `gh release`, so GH_TOKEN/GH_REPO must
 # be set the way `gh` expects.
@@ -30,12 +30,16 @@ actual_assets() {
 }
 
 # Print the predicate-type multiset carried by a single `.intoto.jsonl`: one
-# "<count> <predicate-type>" line per distinct type. A per-tool scan
-# attestation appears once per tool, so the multiset reflects the run's
-# scan-tools config.
+# "<count> <predicate-type>" line per distinct type. A scan/v1 predicate is
+# keyed by its tool name (`scan/v1[<tool>]`) so a missing or duplicated scan
+# tool drifts even when the bare scan/v1 count stays put (#492).
 bundle_multiset() {
     local f="$1" types
-    types="$(jq -er '(.dsseEnvelope.payload // .payload)|@base64d|fromjson|.predicateType' "$f")" \
+    types="$(jq -er '
+        (.dsseEnvelope.payload // .payload)|@base64d|fromjson
+        | if .predicateType|endswith("/attestation/scan/v1")
+          then .predicateType + "[" + (.predicate.tool.name // "?") + "]"
+          else .predicateType end' "$f")" \
         || die "malformed bundle: $(basename "$f")"
     printf '%s\n' "$types" | sort | uniq -c | sed -E 's/^ *//'
 }
@@ -46,7 +50,7 @@ bundle_multiset() {
 # artifact — so a scan attestation missing from one bundle fails even if
 # another bundle still carries it. Every bundle must carry the same set;
 # empty bundles (no DSSE lines) are reported so a no-op attach is caught.
-actual_bundles() {
+actual_predicates() {
     local tag="$1" dir f ms first=""
     dir="$(mktemp -d)"
     gh release download "$tag" --dir "$dir" --pattern '*.intoto.jsonl' --clobber >/dev/null 2>&1 \
@@ -73,19 +77,32 @@ actual_bundles() {
     printf '%s\n' "$first"
 }
 
-# Compare actual against the golden file; on drift print a diff and the update
-# command and exit 1. --update overwrites the golden and exits 0.
+# Strip the explainer header from a golden body: drop `#` comment and blank
+# lines, leaving only the asserted set.
+strip_header() { grep -Ev '^[[:space:]]*(#|$)' || true; }
+
+# Print the leading header block of a golden file: the run of `#`/blank lines
+# at the very top, used to preserve the explainer across --update.
+golden_header() { sed -n '/^[[:space:]]*\(#\|$\)/!q;p' "$1"; }
+
+# Compare actual against the golden body (header comments ignored on both
+# sides); on drift print a diff and the update command and exit 1. --update
+# rewrites the body while preserving the existing leading header block.
 compare_or_update() {
-    local actual="$1" golden_file="$2" update="$3" label="$4" update_cmd="$5"
+    local actual="$1" golden_file="$2" update="$3" label="$4" update_cmd="$5" header=""
     if [[ "$update" == "--update" ]]; then
-        printf '%s\n' "$actual" > "$golden_file"
+        [[ -f "$golden_file" ]] && header="$(golden_header "$golden_file")"
+        { [[ -n "$header" ]] && printf '%s\n' "$header"; printf '%s\n' "$actual"; } > "$golden_file"
         printf 'Updated %s golden: %s\n' "$label" "$golden_file"
         return 0
     fi
     [[ -f "$golden_file" ]] || die "golden not found: $golden_file (run: $update_cmd)"
-    if ! diff -u "$golden_file" <(printf '%s\n' "$actual") >/dev/null; then
+    local golden_body actual_body
+    golden_body="$(strip_header < "$golden_file")"
+    actual_body="$(printf '%s\n' "$actual" | strip_header)"
+    if ! diff -u <(printf '%s\n' "$golden_body") <(printf '%s\n' "$actual_body") >/dev/null; then
         printf '%s golden drift (%s):\n' "$label" "$golden_file" >&2
-        diff -u "$golden_file" <(printf '%s\n' "$actual") >&2 || true
+        diff -u <(printf '%s\n' "$golden_body") <(printf '%s\n' "$actual_body") >&2 || true
         printf '\nIf this change is intended, regenerate the golden:\n  %s\n' "$update_cmd" >&2
         return 1
     fi
@@ -93,7 +110,7 @@ compare_or_update() {
 }
 
 main() {
-    local mode="${1:?Usage: check_golden.sh <assets|bundles> <golden-dir> <release-tag> [--update]}"
+    local mode="${1:?Usage: check_golden.sh <assets|predicates> <golden-dir> <release-tag> [--update]}"
     local golden_dir="${2:?missing <golden-dir>}"
     local tag="${3:?missing <release-tag>}"
     local update="${4:-}"
@@ -103,12 +120,12 @@ main() {
                 "${golden_dir}/assets.golden" "$update" "asset-set" \
                 "tools/golden/check_golden.sh assets ${golden_dir} ${tag} --update"
             ;;
-        bundles)
-            compare_or_update "$(actual_bundles "$tag")" \
-                "${golden_dir}/bundles.golden" "$update" "bundle-predicate" \
-                "tools/golden/check_golden.sh bundles ${golden_dir} ${tag} --update"
+        predicates)
+            compare_or_update "$(actual_predicates "$tag")" \
+                "${golden_dir}/predicates.golden" "$update" "predicate" \
+                "tools/golden/check_golden.sh predicates ${golden_dir} ${tag} --update"
             ;;
-        *) die "unknown mode: $mode (expected assets or bundles)" ;;
+        *) die "unknown mode: $mode (expected assets or predicates)" ;;
     esac
 }
 

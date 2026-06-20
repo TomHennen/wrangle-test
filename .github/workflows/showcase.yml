@@ -356,8 +356,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tools/golden/check_golden.sh assets tools/golden/showcase "$TAG"
-          tools/golden/check_golden.sh bundles tools/golden/showcase "$TAG"
+          tools/golden/check_golden.sh assets     tools/golden/showcase "$TAG"
+          tools/golden/check_golden.sh predicates tools/golden/showcase "$TAG"
 
   # Prune old tracking tags + their pre-releases. Tracking tags accumulate
   # one-per-wrangle-main-push and are only useful as a heartbeat — a 30-day
