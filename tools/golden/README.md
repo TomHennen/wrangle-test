@@ -26,6 +26,8 @@ The predicate golden is config-aware — the scan-tools set decides which
 - `showcase/` — the showcase's default scan tools (osv-scanner/zizmor/
   wrangle-lint). Checked in `showcase.yml`.
 - `integration/` — the per-PR integration config (`scan-tools: zizmor`).
+  Checked on the wrangle PR's `dispatch` via the temp-tag release path
+  (`test-wrangle.yml.template`).
 
 The asset set does not vary by config, so `integration/assets.golden` and
 `showcase/assets.golden` are byte-identical by design.
