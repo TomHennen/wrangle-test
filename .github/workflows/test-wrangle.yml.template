@@ -81,10 +81,10 @@ jobs:
           jq -e '.predicate.verificationResult == "PASSED"' <<<"$payload"
           jq -e '.predicate.verifiedLevels | index("SLSA_BUILD_LEVEL_3")' <<<"$payload"
 
-  # Push a version-bump commit before the build so test-python exercises
+  # Push a version-bump commit before the build so test-python-pip exercises
   # wrangle's `ref:` input (build a commit pushed after the trigger, the
   # release-please-style flow), not just the triggering SHA.
-  prep-python:
+  prep-python-pip:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -95,17 +95,17 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          sed -i "s/version = .*/version = \"0.0.1.dev${RUN_ID}\"/" python/pyproject.toml
+          sed -i "s/version = .*/version = \"0.0.1.dev${RUN_ID}\"/" python-pip/pyproject.toml
           git config user.name "wrangle-integration"
           git config user.email "wrangle-integration@noreply"
-          git add python/pyproject.toml
+          git add python-pip/pyproject.toml
           git commit -m "Set test version 0.0.1.dev${RUN_ID}"
           git push
 
   # Python fixture — build + provenance + verify (via wrangle's reusable
-  # workflow), building the prep-python commit through the `ref:` input.
-  test-python:
-    needs: [prep-python]
+  # workflow), building the prep-python-pip commit through the `ref:` input.
+  test-python-pip:
+    needs: [prep-python-pip]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -118,7 +118,7 @@ jobs:
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@__WRANGLE_SHA__
     with:
-      path: python
+      path: python-pip
       ref: ${{ github.ref }}
       release-events: non-pull-request   # explicit; matches the default
       scan-tools: zizmor   # osv covered once in test-scan (see test-shell)
@@ -126,8 +126,8 @@ jobs:
       policy: policies/wrangle-provenance-python-v1.hjson
 
   # Python uv fixture — exercises wrangle's uv tooling branch (distinct from
-  # test-python's pip path). Build-only (no publish) since publish coverage is
-  # in test-python.
+  # test-python-pip's pip path). Build-only (no publish) since publish coverage
+  # is in test-python-pip.
   test-python-uv:
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
@@ -144,18 +144,18 @@ jobs:
       policy: policies/wrangle-provenance-python-v1.hjson
 
   # Push an npm version-bump commit before the build so test-npm exercises
-  # wrangle's `ref:` input (same purpose as prep-python). Runs after
-  # prep-python so the two version-bump pushes serialize on the same
+  # wrangle's `ref:` input (same purpose as prep-python-pip). Runs after
+  # prep-python-pip so the two version-bump pushes serialize on the same
   # integration/** branch instead of racing each other.
   prep-npm:
-    needs: [prep-python]
+    needs: [prep-python-pip]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
         with:
-          # Get whatever prep-python pushed, not the original triggering SHA.
+          # Get whatever prep-python-pip pushed, not the original triggering SHA.
           ref: ${{ github.ref }}
       - name: Set unique test version
         env:

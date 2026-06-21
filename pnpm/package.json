@@ -1,5 +1,5 @@
 {
-  "name": "@tomhennen/wrangle-integration-fixture",
+  "name": "wrangle-pnpm-fixture",
   "version": "0.0.1",
   "description": "Disposable test fixture for wrangle's npm integration tests (pnpm variant). Do not depend on this package.",
   "license": "MIT",

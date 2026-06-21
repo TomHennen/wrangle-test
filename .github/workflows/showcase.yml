@@ -76,7 +76,7 @@ jobs:
 
   # PEP 517 build + pytest + SLSA L3 provenance + verify. Built from the
   # showcase-build branch for prep's per-run version bump (see harness below).
-  python:
+  python-pip:
     needs: [prep, create-release]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
@@ -86,11 +86,11 @@ jobs:
       attestations: write
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
     with:
-      path: python
+      path: python-pip
       ref: showcase-build
       release-events: non-pull-request
 
-  # uv tooling branch. Build-only (publish coverage is in `python`), so
+  # uv tooling branch. Build-only (publish coverage is in `python-pip`), so
   # static version, builds the triggering commit.
   python-uv:
     needs: [create-release]
@@ -122,9 +122,8 @@ jobs:
       release-events: non-pull-request
 
   # pnpm tooling branch (Corepack, frozen-lockfile, pnpm pack). Build-only:
-  # the pnpm fixture shares the npm fixture's package name, so publishing both
-  # would collide — publish coverage stays in `npm`. Static version, builds
-  # the triggering commit.
+  # publish coverage for the npm ecosystem stays in `npm`. Static version,
+  # builds the triggering commit.
   pnpm:
     needs: [create-release]
     permissions:
@@ -174,8 +173,8 @@ jobs:
   # ===================================================================
 
   publish-python:
-    if: ${{ needs.python.outputs.should-release == 'true' }}
-    needs: [python]
+    if: ${{ needs.python-pip.outputs.should-release == 'true' }}
+    needs: [python-pip]
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
@@ -188,14 +187,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.python.outputs.dist-artifact-name }}
+          name: ${{ needs.python-pip.outputs.dist-artifact-name }}
           path: dist/
       # Verify this job's own download against wrangle's signed VSA — the
       # full policy verdict — before any bytes leave for the registry.
       - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
         with:
           path: dist/
-          resource-uri: ${{ needs.python.outputs.resource-uri }}
+          resource-uri: ${{ needs.python-pip.outputs.resource-uri }}
       - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           attestations: true
@@ -288,14 +287,14 @@ jobs:
             printf 'Manual run: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
           fi
 
-          sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" python/pyproject.toml
+          sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" python-pip/pyproject.toml
           # `npm version` rewrites package.json AND package-lock.json so
           # `npm ci` in the build stays in sync.
           ( cd npm && npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version )
 
           git config user.name "wrangle-showcase"
           git config user.email "wrangle-showcase@users.noreply.github.com"
-          git add python/pyproject.toml npm/package.json npm/package-lock.json
+          git add python-pip/pyproject.toml npm/package.json npm/package-lock.json
           git commit -m "showcase: pin versions (python ${PY_VERSION}, npm ${NPM_VERSION})" \
             || printf 'No version change to commit\n'
           # Fully qualify dst: with src=HEAD (detached, no local branch),
@@ -341,7 +340,7 @@ jobs:
   # (osv/zizmor/wrangle-lint), so it checks the fuller `showcase` golden.
   golden:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, python-uv, npm, pnpm, go]
+    needs: [python-pip, python-uv, npm, pnpm, go]
     runs-on: ubuntu-latest
     permissions:
       contents: read   # gh release download (read the assembled release)
@@ -366,7 +365,7 @@ jobs:
   # regex AND `prerelease: true`, so a hand-cut `vX.Y.Z` is never touched.
   prune-tracking-tags:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs: [python, python-uv, npm, pnpm, go]
+    needs: [python-pip, python-uv, npm, pnpm, go]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # delete tags + releases
