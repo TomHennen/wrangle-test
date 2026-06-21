@@ -6,10 +6,12 @@ name: Test Wrangle
 # See: https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md
 #
 # Two trigger paths drive the per-PR run:
-#   - tag `pr-<n>-<runid>` — the release-bearing path: a temp tag the dispatch
-#     pushes so wrangle's tag-gated verify fires, which creates a real
+#   - tag `0.0.0-pr.<n>.<runid>` — the release-bearing path: a temp tag the
+#     dispatch pushes so wrangle's tag-gated verify fires, which creates a real
 #     (temporary) release and attaches the attested asset set the golden job
-#     asserts. The cleanup-integration.yml reaper prunes it after 7 days.
+#     asserts. The tag is valid semver so wrangle's goreleaser-based go build
+#     accepts it; it has no `v` prefix so it never matches showcase.yml's
+#     `tags: ["v*"]`. The cleanup-integration.yml reaper prunes it after 7 days.
 #   - branch `integration/**` — compatibility fallback for a dispatch that
 #     still pushes a branch; runs build/verify without a release (the golden
 #     job is tag-gated, so it is part of the release-bearing path only).
@@ -17,14 +19,14 @@ name: Test Wrangle
 on:
   push:
     branches: ["integration/**"]
-    tags: ["pr-*"]
+    tags: ["0.0.0-pr.*"]
 
 jobs:
-  # Fail fast on a tag that the trigger glob `pr-*` admits but the
-  # cleanup-integration.yml reaper's `^pr-[0-9]+-[0-9]+$` would never prune.
-  # Such a tag would run the release-bearing path and leak an unreaped release;
-  # the release-bearing jobs `needs: [ref-guard]` so none start on a bad tag.
-  # Branch (integration/**) pushes carry no tag and pass through untouched.
+  # Fail fast on a tag that the trigger glob `0.0.0-pr.*` admits but the
+  # cleanup-integration.yml reaper's `^0\.0\.0-pr\.[0-9]+\.[0-9]+$` would never
+  # prune. Such a tag would run the release-bearing path and leak an unreaped
+  # release; the release-bearing jobs `needs: [ref-guard]` so none start on a
+  # bad tag. Branch (integration/**) pushes carry no tag and pass through.
   ref-guard:
     runs-on: ubuntu-latest
     permissions: {}
@@ -35,8 +37,8 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$REF_NAME" =~ ^pr-[0-9]+-[0-9]+$ ]]; then
-            printf 'ERROR: tag %s is not a reapable pr-<n>-<runid> tag\n' "$REF_NAME" >&2
+          if [[ ! "$REF_NAME" =~ ^0\.0\.0-pr\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'ERROR: tag %s is not a reapable 0.0.0-pr.<n>.<runid> tag\n' "$REF_NAME" >&2
             exit 1
           fi
 
@@ -284,11 +286,12 @@ jobs:
       policy: policies/wrangle-provenance-npm-v1.hjson
 
   # Go fixture — exercises wrangle's Go build pipeline end-to-end. goreleaser
-  # runs with `--skip=publish`, so a non-semver tag (the temp `pr-<n>-<runid>`)
-  # builds the archives + `checksums.txt` without publishing a release of its
-  # own; wrangle's verify job then attaches the attested set to the run's
-  # release. On the branch path the upload is gated off (no tag), covering
-  # build → SBOM → hash → gate → provenance → verify, the L3-bearing stretch.
+  # runs with `--skip=publish` and requires a valid-semver tag, which the temp
+  # `0.0.0-pr.<n>.<runid>` is; it builds the archives + `checksums.txt` without
+  # publishing a release of its own, and wrangle's verify job then attaches the
+  # attested set to the run's release. On the branch path the upload is gated
+  # off (no tag), covering build → SBOM → hash → gate → provenance → verify,
+  # the L3-bearing stretch.
   test-go:
     needs: [ref-guard]
     permissions:

@@ -12,22 +12,16 @@ set -f
 #   <VER>  a package version sitting before a dist extension — the npm/pnpm
 #          `.tgz`, python `.whl` / `.tar.gz`, separated by `-` or `_`.
 #   <TAG>  the release tag carried in go's archive name (vYYYYMMDD-<sha7>,
-#          vX.Y.Z, or the per-PR pr-<n>-<runid>, which goreleaser embeds as the
-#          normalized version 0.0.0-pr.<n>.<runid>).
+#          vX.Y.Z, or the per-PR 0.0.0-pr.<n>.<runid>).
 #
 # Usage: normalize.sh <release-tag>   (asset names on stdin, one per line)
 
 normalize_assets() {
     local tag="$1"
-    # goreleaser resolves its embedded version from the git tag: a semver tag
-    # (vX.Y.Z, vYYYYMMDD-<sha7>) is kept verbatim minus the `v`, but the
-    # non-semver per-PR `pr-<n>-<runid>` is normalized to `0.0.0-pr.<n>.<runid>`
-    # (the `-`s become `.`s, a `0.0.0-` prefix is added). Mask whichever form go
-    # actually carries back to <TAG>.
+    # goreleaser embeds the git tag verbatim minus a leading `v`. Every tag this
+    # masks is already semver (vX.Y.Z, vYYYYMMDD-<sha7>, or 0.0.0-pr.<n>.<runid>),
+    # so `${tag#v}` is the version go carries in its archive name.
     local go_ver="${tag#v}"
-    if [[ "$tag" =~ ^pr-([0-9]+)-([0-9]+)$ ]]; then
-        go_ver="0.0.0-pr.${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-    fi
     local name
     while IFS= read -r name; do
         [[ -z "$name" ]] && continue
