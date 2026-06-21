@@ -35,6 +35,19 @@ EOF
     [ "$output" = "wrangle-test-fixture-go_<TAG>_linux_amd64.tar.gz" ]
 }
 
+# A per-PR `pr-<n>-<runid>` tag is non-semver, so goreleaser embeds it as the
+# normalized version `0.0.0-pr.<n>.<runid>` in go's archive name. The mask must
+# still collapse that to <TAG> so it matches the golden's `_<TAG>_linux_` shape.
+@test "normalize collapses goreleaser's normalized per-PR go version to the tag" {
+    run normalize_assets pr-99001-1781989666 <<'EOF'
+wrangle-test-fixture-go_0.0.0-pr.99001.1781989666_linux_amd64.tar.gz
+wrangle-test-fixture-go_0.0.0-pr.99001.1781989666_linux_amd64.tar.gz.intoto.jsonl
+EOF
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "wrangle-test-fixture-go_<TAG>_linux_amd64.tar.gz" ]
+    [ "${lines[1]}" = "wrangle-test-fixture-go_<TAG>_linux_amd64.tar.gz.intoto.jsonl" ]
+}
+
 @test "normalize leaves the metadata zip and checksums untouched" {
     run normalize_assets v1.2.3 <<'EOF'
 go-metadata-go.zip

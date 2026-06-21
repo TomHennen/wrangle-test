@@ -20,6 +20,26 @@ on:
     tags: ["pr-*"]
 
 jobs:
+  # Fail fast on a tag that the trigger glob `pr-*` admits but the
+  # cleanup-integration.yml reaper's `^pr-[0-9]+-[0-9]+$` would never prune.
+  # Such a tag would run the release-bearing path and leak an unreaped release;
+  # the release-bearing jobs `needs: [ref-guard]` so none start on a bad tag.
+  # Branch (integration/**) pushes carry no tag and pass through untouched.
+  ref-guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject a tag the reaper would not prune
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REF_NAME" =~ ^pr-[0-9]+-[0-9]+$ ]]; then
+            printf 'ERROR: tag %s is not a reapable pr-<n>-<runid> tag\n' "$REF_NAME" >&2
+            exit 1
+          fi
+
   test-shell:
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
@@ -36,6 +56,7 @@ jobs:
 
   # Container fixture — build + provenance + VSA through to the registry.
   test-container:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -98,6 +119,7 @@ jobs:
   # GitHub Releases accept version reuse, so the build uses the tagged
   # commit's checked-in version. The `ref:` coverage lives on the branch path.
   prep-python-pip:
+    needs: [ref-guard]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -143,6 +165,7 @@ jobs:
   # test-python-pip's pip path). Build-only (no publish) since publish coverage
   # is in test-python-pip.
   test-python-uv:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -245,6 +268,7 @@ jobs:
   # is what gets checked out, which is what wrangle's reusable
   # workflow does by default when `ref` is empty.
   test-pnpm:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -266,6 +290,7 @@ jobs:
   # release. On the branch path the upload is gated off (no tag), covering
   # build → SBOM → hash → gate → provenance → verify, the L3-bearing stretch.
   test-go:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
