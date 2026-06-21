@@ -4,12 +4,44 @@ name: Test Wrangle
 # __WRANGLE_SHA__ with the PR's head SHA. This file is a template —
 # the .template suffix prevents GitHub Actions from discovering it.
 # See: https://github.com/TomHennen/wrangle/blob/main/test/integration/SPEC.md
+#
+# Two trigger paths drive the per-PR run:
+#   - tag `0.0.0-pr.<n>.<runid>` — the release-bearing path: a temp tag the
+#     dispatch pushes so wrangle's tag-gated verify fires, which creates a real
+#     (temporary) release and attaches the attested asset set the golden job
+#     asserts. The tag is valid semver so wrangle's goreleaser-based go build
+#     accepts it; it has no `v` prefix so it never matches showcase.yml's
+#     `tags: ["v*"]`. The cleanup-integration.yml reaper prunes it after 7 days.
+#   - branch `integration/**` — compatibility fallback for a dispatch that
+#     still pushes a branch; runs build/verify without a release (the golden
+#     job is tag-gated, so it is part of the release-bearing path only).
 
 on:
   push:
     branches: ["integration/**"]
+    tags: ["0.0.0-pr.*"]
 
 jobs:
+  # Fail fast on a tag that the trigger glob `0.0.0-pr.*` admits but the
+  # cleanup-integration.yml reaper's `^0\.0\.0-pr\.[0-9]+\.[0-9]+$` would never
+  # prune. Such a tag would run the release-bearing path and leak an unreaped
+  # release; the release-bearing jobs `needs: [ref-guard]` so none start on a
+  # bad tag. Branch (integration/**) pushes carry no tag and pass through.
+  ref-guard:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Reject a tag the reaper would not prune
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$REF_NAME" =~ ^0\.0\.0-pr\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'ERROR: tag %s is not a reapable 0.0.0-pr.<n>.<runid> tag\n' "$REF_NAME" >&2
+            exit 1
+          fi
+
   test-shell:
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
@@ -26,6 +58,7 @@ jobs:
 
   # Container fixture — build + provenance + VSA through to the registry.
   test-container:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -83,14 +116,19 @@ jobs:
 
   # Push a version-bump commit before the build so test-python-pip exercises
   # wrangle's `ref:` input (build a commit pushed after the trigger, the
-  # release-please-style flow), not just the triggering SHA.
+  # release-please-style flow), not just the triggering SHA. On the tag
+  # (release-bearing) path the push is skipped — the tag is detached and
+  # GitHub Releases accept version reuse, so the build uses the tagged
+  # commit's checked-in version. The `ref:` coverage lives on the branch path.
   prep-python-pip:
+    needs: [ref-guard]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
       - name: Set unique test version
+        if: ${{ github.ref_type != 'tag' }}
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
@@ -129,6 +167,7 @@ jobs:
   # test-python-pip's pip path). Build-only (no publish) since publish coverage
   # is in test-python-pip.
   test-python-uv:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -158,6 +197,7 @@ jobs:
           # Get whatever prep-python-pip pushed, not the original triggering SHA.
           ref: ${{ github.ref }}
       - name: Set unique test version
+        if: ${{ github.ref_type != 'tag' }}
         env:
           RUN_ID: ${{ github.run_id }}
         run: |
@@ -230,6 +270,7 @@ jobs:
   # is what gets checked out, which is what wrangle's reusable
   # workflow does by default when `ref` is empty.
   test-pnpm:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
@@ -244,24 +285,19 @@ jobs:
       # Integration runs a reduced scan set; verify against the provenance tier it satisfies (default/strict are validated by the showcase + golden set). See TomHennen/wrangle#497.
       policy: policies/wrangle-provenance-npm-v1.hjson
 
-  # Go fixture — exercises wrangle's Go build pipeline end-to-end.
-  # Unlike python and npm, wrangle's Go reusable workflow OWNS publish
-  # (Go has no language-level package registry with a caller-bound OIDC
-  # constraint — the publish target is GitHub Releases, and wrangle's
-  # publish job runs after verify). There is therefore no separate
-  # `publish-go:` job here; the test-go uses-line is the full
-  # integration. The publish path inside wrangle's reusable workflow is
-  # additionally gated on `startsWith(github.ref, 'refs/tags/')`, so on
-  # integration/** push events it is correctly skipped — the integration
-  # test covers build → SBOM → hash → gate → provenance → verify, which
-  # is the L3-bearing stretch of the pipeline. End-to-end publish (which
-  # is a thin `gh release create` / `upload`) is exercised by manual
-  # release runs.
+  # Go fixture — exercises wrangle's Go build pipeline end-to-end. goreleaser
+  # runs with `--skip=publish` and requires a valid-semver tag, which the temp
+  # `0.0.0-pr.<n>.<runid>` is; it builds the archives + `checksums.txt` without
+  # publishing a release of its own, and wrangle's verify job then attaches the
+  # attested set to the run's release. On the branch path the upload is gated
+  # off (no tag), covering build → SBOM → hash → gate → provenance → verify,
+  # the L3-bearing stretch.
   test-go:
+    needs: [ref-guard]
     permissions:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
-      contents: write   # wrangle's publish job (gh release) + verify job (attach VSA to release)
+      contents: write   # wrangle's verify job creates the release if absent + attaches the attested set
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
     uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@__WRANGLE_SHA__
@@ -282,3 +318,35 @@ jobs:
       # Scorecard requires the default branch; integration/* branches can't use it.
       # See: https://github.com/ossf/scorecard-action#workflow-restrictions
       tools: "osv zizmor"
+
+  # ===================================================================
+  # Release-bearing golden assertion (tag path only).
+  # Skip when reading for "how do I use wrangle for X".
+  # ===================================================================
+
+  # Golden-set assertion over the assembled release: the rationalized asset set
+  # (python/python-uv/npm/pnpm/go ecosystems) and each bundle's predicate types
+  # must match the integration config's checked-in goldens (scan-tools: zizmor
+  # → one scan/v1). Catches a silently no-op'd asset attach (#501) and a missing
+  # scan attestation (#492) on the wrangle PR's dispatch check. Tag-gated: the
+  # release exists only on the release-bearing path, where wrangle's verify
+  # creates it and attaches the attested set.
+  golden:
+    if: ${{ github.ref_type == 'tag' }}
+    needs: [test-python-pip, test-python-uv, test-npm, test-pnpm, test-go]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # gh release download (read the assembled release)
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Assert release assets + bundle predicates match the integration golden
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tools/golden/check_golden.sh assets     tools/golden/integration "$TAG"
+          tools/golden/check_golden.sh predicates tools/golden/integration "$TAG"
