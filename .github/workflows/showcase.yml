@@ -2,14 +2,15 @@ name: Showcase
 
 # Stable, non-template companion to test-wrangle.yml.template: it runs the
 # real adopter-facing workflows end to end, where the template runs them
-# per-PR pinned to a PR SHA. Two tag flavors drive it:
+# per-PR pinned to a PR SHA.
 #
-#   - Tracking tags `vYYYYMMDD-<wrangle-sha7>` — pushed automatically by
-#     wrangle's release-showcase.yml on every push to main. Marked as
-#     pre-releases; the heartbeat that catches infra regressions (Sigstore
-#     root rotation, registry/API changes) between wrangle releases.
-#   - Curated tags `vX.Y.Z` — pushed by hand for the stable, clickable
-#     example artifacts in wrangle's adopter docs (TomHennen/wrangle#200).
+# This is the current-state heartbeat: it runs wrangle `@main` against
+# tracking tags `vYYYYMMDD-<wrangle-sha7>` — pushed automatically by wrangle's
+# release-showcase.yml on every push to main — to catch infra regressions
+# (Sigstore root rotation, registry/API changes) between wrangle releases.
+# Tracking-tag Releases are pre-releases, pruned after 30 days. The tag-pinned,
+# consumer-verifiable counterpart — curated `vX.Y.Z` releases and the source of
+# the VSA test fixtures — is showcase-release.yml.
 #
 # Tag-driven, not schedule-driven, on purpose: wrangle gates VSA-attach-to-
 # Release on refs/tags/*, so only a tag push exercises that path.
@@ -23,14 +24,13 @@ name: Showcase
 # registries that reject version reuse, and accumulates tracking tags to
 # prune. Ignore the harness when reading for "how do I use wrangle for X".
 #
-# TODO(wrangle-test#10): wrangle's reusable workflows are pinned at `@main`
-# because no release tag yet carries the npm/python workflows + release-
-# events machinery. Repoint to a release tag once one exists, and drop the
-# zizmor unpinned-uses suppressions.
+# wrangle's reusable workflows are pinned at `@main` on purpose — this
+# heartbeat tracks the latest main. The build at a release tag lives in
+# showcase-release.yml.
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*-*"]   # tracking tags only; curated vX.Y.Z drive showcase-release.yml
   workflow_dispatch:
 
 # prep force-pushes the shared `showcase-build` branch, so overlapping runs
@@ -52,7 +52,7 @@ jobs:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
       contents: read
-    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       scan-path: shell
 
@@ -65,7 +65,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: container
       imagename: ghcr.io/tomhennen/wrangle-test-showcase
@@ -84,7 +84,7 @@ jobs:
       contents: write   # wrangle's verify job (attach VSA to release); validated at startup
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: python-pip
       ref: showcase-build
@@ -100,7 +100,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: python-uv
       release-events: non-pull-request
@@ -115,7 +115,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: npm
       ref: showcase-build
@@ -132,7 +132,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: pnpm
       release-events: non-pull-request
@@ -149,7 +149,7 @@ jobs:
       contents: write   # goreleaser creates the Release; wrangle's verify job attaches the VSA
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       path: go
       release-events: non-pull-request
@@ -162,7 +162,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
     with:
       tools: "osv zizmor"
 
@@ -191,7 +191,7 @@ jobs:
           path: dist/
       # Verify this job's own download against wrangle's signed VSA — the
       # full policy verdict — before any bytes leave for the registry.
-      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
         with:
           path: dist/
           resource-uri: ${{ needs.python-pip.outputs.resource-uri }}
@@ -228,7 +228,7 @@ jobs:
           path: dist/
       # Verify this job's own download against wrangle's signed VSA — the
       # full policy verdict — before any bytes leave for the registry.
-      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] - intentional @main heartbeat
         with:
           path: dist/
           resource-uri: ${{ needs.npm.outputs.resource-uri }}

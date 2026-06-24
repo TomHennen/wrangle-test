@@ -1,0 +1,225 @@
+name: Showcase (curated release)
+
+# The tag-pinned counterpart to showcase.yml. showcase.yml runs wrangle `@main`
+# as a current-state heartbeat (tracking tags, non-release dogfood gate); this
+# builds at a wrangle *release tag*, so its VSAs carry a release-tag signer
+# identity and pass the shipped strict consumer policy — exactly what a real
+# adopter (who pins a release tag) gets. It is the source of the consumer-VSA
+# test fixtures and the clickable, verifiable example artifacts linked from
+# wrangle's docs.
+#
+# Scope is the published build types — npm / python / container. The wrangle
+# pin is bumped by Dependabot (github-actions ecosystem).
+
+on:
+  push:
+    tags: ["v*.*.*"]   # curated semver releases; tracking tags (v*-*) drive showcase.yml
+  workflow_dispatch:   # fixture capture / dry runs — publishes a dev version, creates no Release
+
+# prep force-pushes the showcase-release-build branch; serialize curated runs.
+concurrency:
+  group: showcase-release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # Publishes to ghcr.io; ghcr needs only GITHUB_TOKEN, no Trusted Publisher.
+  container:
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@v0.2.2 # zizmor: ignore[unpinned-uses] - immutable
+    with:
+      path: container
+      imagename: ghcr.io/tomhennen/wrangle-test-showcase
+      registry: ghcr.io
+      release-events: non-pull-request
+    secrets:
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # PEP 517 build + pytest + SLSA L3 provenance + verify. Built from the
+  # showcase-release-build branch for prep's per-run version bump.
+  python:
+    needs: [prep]
+    permissions:
+      actions: read
+      security-events: write
+      contents: write   # wrangle's verify job (attach VSA to release); validated at startup
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@v0.2.2 # zizmor: ignore[unpinned-uses] - immutable
+    with:
+      path: python
+      ref: showcase-release-build
+      release-events: non-pull-request
+
+  # npm ci + npm test + npm pack + SLSA L3 provenance + verify. Built from
+  # showcase-release-build for prep's version bump.
+  npm:
+    needs: [prep]
+    permissions:
+      actions: read
+      security-events: write
+      contents: write
+      id-token: write
+      attestations: write
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@v0.2.2 # zizmor: ignore[unpinned-uses] - immutable
+    with:
+      path: npm
+      ref: showcase-release-build
+      release-events: non-pull-request
+
+  # ===================================================================
+  # Registry publish — adopter-owned (Trusted Publishing binds the OIDC
+  # token to the caller workflow's filename). Built at a release tag, so the
+  # verify-vsa gate runs at its shipped strict default — no dogfood env.
+  # ===================================================================
+
+  publish-python:
+    if: ${{ needs.python.outputs.should-release == 'true' }}
+    needs: [python]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing + PEP 740 attestations
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.python.outputs.dist-artifact-name }}
+          path: dist/
+      # Verify this job's own download against wrangle's signed VSA — the full
+      # policy verdict — before any bytes leave for the registry.
+      - uses: TomHennen/wrangle/actions/verify-vsa@v0.2.2 # zizmor: ignore[unpinned-uses] - immutable
+        with:
+          path: dist/
+          resource-uri: ${{ needs.python.outputs.resource-uri }}
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          attestations: true
+          packages-dir: dist/
+          repository-url: "https://test.pypi.org/legacy/"
+
+  publish-npm:
+    if: ${{ needs.npm.outputs.should-release == 'true' }}
+    needs: [npm]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for Trusted Publishing
+      contents: read
+    steps:
+      # setup-node v6 + Node 24: npm 11.5.1+ (ships with Node 24) is the
+      # minimum for OIDC publish, and v6 does not inject an empty
+      # NODE_AUTH_TOKEN that would downgrade to legacy token auth.
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.npm.outputs.dist-artifact-name }}
+          path: dist/
+      - uses: TomHennen/wrangle/actions/verify-vsa@v0.2.2 # zizmor: ignore[unpinned-uses] - immutable
+        with:
+          path: dist/
+          resource-uri: ${{ needs.npm.outputs.resource-uri }}
+      # `./` prefix is load-bearing: without it npm's package-arg parser treats
+      # `dist/foo.tgz` as a GitHub shorthand instead of a file. `--tag release`
+      # keeps curated publishes off the package's latest/integration/showcase
+      # dist-tags.
+      - name: Publish to npmjs.org
+        env:
+          TARBALL: ${{ needs.npm.outputs.tarball }}
+        run: npm publish "./dist/${TARBALL}" --provenance --tag release
+
+  # ===================================================================
+  # Showcase harness — test plumbing, not adopter examples.
+  # ===================================================================
+
+  # Stage a unique package version on showcase-release-build — its own branch,
+  # so it can't race showcase.yml's showcase-build. A curated vX.Y.Z publishes
+  # that version; a manual dispatch keys a dev version off the run id (PyPI and
+  # npm both reject re-publishing an existing version).
+  prep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # force-push the showcase-release-build branch
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
+      - name: Stage versions on showcase-release-build
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Curated tags must be bare semver vX.Y.Z. A suffixed tag
+            # (vX.Y.Z-rc1) also matches showcase.yml's v*-* heartbeat trigger,
+            # so both workflows would fire on it — reject it loudly.
+            VERSION_PART="${GITHUB_REF#refs/tags/v}"
+            if [[ ! "$VERSION_PART" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf 'Curated tags must be bare semver vX.Y.Z (got %s)\n' "${GITHUB_REF#refs/tags/}" >&2
+              exit 1
+            fi
+            PY_VERSION="$VERSION_PART"
+            NPM_VERSION="$VERSION_PART"
+            printf 'Curated release: version %s\n' "$VERSION_PART"
+          else
+            # Manual workflow_dispatch — key the dev version by run id.
+            PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
+            NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
+            printf 'Manual run: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
+          fi
+
+          sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" python/pyproject.toml
+          # `npm version` rewrites package.json AND package-lock.json so
+          # `npm ci` in the build stays in sync.
+          ( cd npm && npm version "$NPM_VERSION" --no-git-tag-version --allow-same-version )
+
+          git config user.name "wrangle-showcase"
+          git config user.email "wrangle-showcase@users.noreply.github.com"
+          git add python/pyproject.toml npm/package.json npm/package-lock.json
+          git commit -m "showcase: pin versions (python ${PY_VERSION}, npm ${NPM_VERSION})" \
+            || printf 'No version change to commit\n'
+          git push --force origin "HEAD:refs/heads/showcase-release-build"
+
+  # Permanent, clickable example artifacts on a full GitHub Release: python/npm
+  # dist + SBOM + each build's signed VSA. Curated releases are never
+  # pre-releases and are never pruned. Skipped on dispatch (no tag).
+  release-assets:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [python, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/edit the GitHub Release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+      - name: Attach dist + SBOM to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}   # this job has no checkout; gh needs the repo
+          TAG: ${{ github.ref_name }}
+          PYTHON_DIST: ${{ needs.python.outputs.dist-artifact-name }}
+          PYTHON_META: ${{ needs.python.outputs.metadata-artifact-name }}
+          NPM_DIST: ${{ needs.npm.outputs.dist-artifact-name }}
+          NPM_META: ${{ needs.npm.outputs.metadata-artifact-name }}
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # dist filenames carry package name + version (unique); SBOMs are all
+          # `sbom.spdx.json`, so prefix them by build type.
+          cp "artifacts/${PYTHON_DIST}"/* upload/
+          cp "artifacts/${NPM_DIST}"/* upload/
+          cp "artifacts/${PYTHON_META}/sbom.spdx.json" upload/python-sbom.spdx.json
+          cp "artifacts/${NPM_META}/sbom.spdx.json" upload/npm-sbom.spdx.json
+          # The verify jobs emit each artifact's signed VSA as a workflow
+          # artifact; attach them too so the Release shows the full output set.
+          find artifacts -name '*.intoto.jsonl' -exec cp {} upload/ \;
+
+          gh release create "$TAG" --title "$TAG" \
+            --notes "wrangle-test curated showcase — example wrangle outputs (SBOM, signed SLSA VSA, dist), built at a wrangle release tag." \
+            --verify-tag || true
+          gh release upload "$TAG" upload/* --clobber
