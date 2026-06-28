@@ -260,7 +260,7 @@ jobs:
     permissions:
       contents: write    # force-push the showcase-build branch
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6.0.2 # zizmor: ignore[artipacked] persist-credentials needed for git push
       - name: Stage versions on showcase-build
         run: |
           set -euo pipefail
@@ -345,7 +345,7 @@ jobs:
     permissions:
       contents: read   # gh release download (read the assembled release)
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Assert release assets + bundle predicates match the showcase golden
