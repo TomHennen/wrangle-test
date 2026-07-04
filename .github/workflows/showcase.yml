@@ -2,14 +2,21 @@ name: Showcase
 
 # Stable, non-template companion to test-wrangle.yml.template: it runs the
 # real adopter-facing workflows end to end, where the template runs them
-# per-PR pinned to a PR SHA. Two tag flavors drive it:
+# per-PR pinned to a PR SHA.
 #
-#   - Tracking tags `vYYYYMMDD-<wrangle-sha7>` — pushed automatically by
-#     wrangle's release-showcase.yml on every push to main. Marked as
-#     pre-releases; the heartbeat that catches infra regressions (Sigstore
-#     root rotation, registry/API changes) between wrangle releases.
-#   - Curated tags `vX.Y.Z` — pushed by hand for the stable, clickable
-#     example artifacts in wrangle's adopter docs (TomHennen/wrangle#200).
+# This is the `@main` heartbeat: it fires on tracking tags
+# `vYYYYMMDD-<wrangle-sha7>` (pushed automatically by wrangle's
+# release-showcase.yml on every push to main), builds against wrangle's
+# current dev, and catches infra regressions (Sigstore root rotation,
+# registry/API changes) before a release. Tracking-tag builds are marked as
+# pre-releases and pruned after 30 days. Because the build ref is a branch,
+# the VSA is not release-tag signed, so the verify-vsa gate runs in
+# non-release dogfood mode (WRANGLE_VSA_NON_STRICT=1).
+#
+# Curated `vX.Y.Z` releases — the stable, strict-verifiable example artifacts
+# in wrangle's adopter docs — are built at a release-tag pin by the separate
+# showcase-curated.yml; the dash-vs-dot tag globs keep the two paths from
+# firing on the same tag.
 #
 # Tag-driven, not schedule-driven, on purpose: wrangle gates VSA-attach-to-
 # Release on refs/tags/*, so only a tag push exercises that path.
@@ -22,15 +29,10 @@ name: Showcase
 # only because one repo runs every ecosystem off one tag, publishes to
 # registries that reject version reuse, and accumulates tracking tags to
 # prune. Ignore the harness when reading for "how do I use wrangle for X".
-#
-# TODO(wrangle-test#10): wrangle's reusable workflows are pinned at `@main`
-# because no release tag yet carries the npm/python workflows + release-
-# events machinery. Repoint to a release tag once one exists, and drop the
-# zizmor unpinned-uses suppressions.
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*-*"]   # tracking tags only; curated vX.Y.Z -> showcase-curated.yml
   workflow_dispatch:
 
 # prep force-pushes the shared `showcase-build` branch, so overlapping runs
@@ -52,7 +54,7 @@ jobs:
       actions: read         # source scan: Scorecard reads the Actions API
       security-events: write  # source-scan SARIF -> Security tab
       contents: read
-    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_shell.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       scan-path: shell
 
@@ -65,7 +67,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_container.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: container
       imagename: ghcr.io/tomhennen/wrangle-test-showcase
@@ -84,7 +86,7 @@ jobs:
       contents: write   # wrangle's verify job (attach VSA to release); validated at startup
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: python-pip
       ref: showcase-build
@@ -100,7 +102,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_python.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: python-uv
       release-events: non-pull-request
@@ -115,7 +117,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: npm
       ref: showcase-build
@@ -132,7 +134,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_npm.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: pnpm
       release-events: non-pull-request
@@ -149,7 +151,7 @@ jobs:
       contents: write   # goreleaser creates the Release; wrangle's verify job attaches the VSA
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       path: go
       release-events: non-pull-request
@@ -162,7 +164,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+    uses: TomHennen/wrangle/.github/workflows/check_source_change.yml@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
     with:
       tools: "osv zizmor"
 
@@ -191,7 +193,7 @@ jobs:
           path: dist/
       # Verify this job's own download against wrangle's signed VSA — the
       # full policy verdict — before any bytes leave for the registry.
-      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
         with:
           path: dist/
           resource-uri: ${{ needs.python-pip.outputs.resource-uri }}
@@ -228,7 +230,7 @@ jobs:
           path: dist/
       # Verify this job's own download against wrangle's signed VSA — the
       # full policy verdict — before any bytes leave for the registry.
-      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] see TODO(wrangle-test#10)
+      - uses: TomHennen/wrangle/actions/verify-vsa@main # zizmor: ignore[unpinned-uses] @main heartbeat: builds wrangle's current dev, not a release
         with:
           path: dist/
           resource-uri: ${{ needs.npm.outputs.resource-uri }}
@@ -264,28 +266,13 @@ jobs:
       - name: Stage versions on showcase-build
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION_PART="${TAG#v}"
-          if [[ "$VERSION_PART" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            PY_VERSION="$VERSION_PART"
-            NPM_VERSION="$VERSION_PART"
-            printf 'Curated release: version %s\n' "$VERSION_PART"
-          elif [[ "$VERSION_PART" =~ ^([0-9]{8})- ]]; then
-            # Tracking tag vYYYYMMDD-<sha> -> PEP 440 dev / SemVer pre-release.
-            # wrangle pushes one tag per main commit, so several land per day;
-            # the version must be unique per run, not per day. PEP 440's dev
-            # segment is a single integer (no room for the SHA), so key both
-            # on the run id and keep the date only for the log line.
-            DATE="${BASH_REMATCH[1]}"
-            PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
-            NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
-            printf 'Tracking tag %s: python=%s npm=%s\n' "$DATE" "$PY_VERSION" "$NPM_VERSION"
-          else
-            # Manual workflow_dispatch — key the dev version by run id.
-            PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
-            NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
-            printf 'Manual run: python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
-          fi
+          # Tracking tags and manual dispatch both build a per-run dev version:
+          # PyPI/npmjs reject re-publishing a version, and wrangle pushes several
+          # tracking tags per day, so uniqueness is keyed on the run id. PEP 440's
+          # dev segment is a single integer, so there's no room for the SHA.
+          PY_VERSION="0.0.1.dev${GITHUB_RUN_ID}"
+          NPM_VERSION="0.0.1-dev.${GITHUB_RUN_ID}"
+          printf 'python=%s npm=%s\n' "$PY_VERSION" "$NPM_VERSION"
 
           sed -i "s/^version = .*/version = \"${PY_VERSION}\"/" python-pip/pyproject.toml
           # `npm version` rewrites package.json AND package-lock.json so
@@ -321,17 +308,12 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Curated `vX.Y.Z` -> full release; tracking `vYYYYMMDD-<sha>`
-          # -> pre-release (keeps them out of the "Latest release" badge).
-          create_flags=()
-          version_part="${TAG#v}"
-          if [[ ! "$version_part" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            create_flags+=(--prerelease)
-          fi
+          # Tracking tags are pre-releases, keeping them out of the "Latest
+          # release" badge; they're pruned after 30 days by prune-tracking-tags.
           # `|| true` keeps a re-run idempotent (the Release already exists).
           gh release create "$TAG" --title "$TAG" \
             --notes "wrangle-test showcase build — example wrangle outputs (SBOM, signed SLSA VSA, dist)." \
-            --verify-tag "${create_flags[@]}" || true
+            --verify-tag --prerelease || true
 
   # Golden-set assertion over the assembled release: the rationalized asset
   # set and each bundle's predicate types must match the showcase config's
