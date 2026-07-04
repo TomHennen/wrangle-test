@@ -1,0 +1,31 @@
+name: Showcase (curated)
+
+# Curated companion to showcase.yml. It fires only on hand-cut release tags
+# `vX.Y.Z` and pins wrangle's reusable workflow at the matching release tag, so
+# the VSA's signer identity is `@refs/tags/vX.Y.Z` and the artifact passes the
+# strict `wrangle-vsa-consumer-v1` policy — the stable, consumer-verifiable
+# example a wrangle release links from its adopter docs. showcase.yml is the
+# `@main` heartbeat and handles tracking tags; the two never fire on the same
+# tag (dash vs. dot in the tag name).
+#
+# The wrangle pin is a release tag, not a hash: a `@<sha>` pin would sign the
+# VSA with a `@<sha>` identity, which the strict consumer policy rejects. A
+# reusable-workflow `uses:` ref cannot be a `${{ }}` expression, so the pin is
+# bumped by hand each release — keep it equal to the `vX.Y.Z` tag you push.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  go:
+    permissions:
+      actions: read         # source scan: Scorecard reads the Actions API
+      security-events: write  # source-scan SARIF -> Security tab
+      contents: write       # goreleaser build + wrangle creates the Release and attaches the VSA
+      id-token: write
+      attestations: write   # wrangle attest job (actions/attest-build-provenance)
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@v0.3.1 # zizmor: ignore[unpinned-uses] release-tag pin required so the VSA signer ref is @refs/tags/v0.3.1
+    with:
+      path: go
+      release-events: non-pull-request
