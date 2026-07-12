@@ -25,7 +25,7 @@ jobs:
       contents: write       # goreleaser build + wrangle creates the Release and attaches the VSA
       id-token: write
       attestations: write   # wrangle attest job (actions/attest-build-provenance)
-    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@v0.3.1 # zizmor: ignore[unpinned-uses] release-tag pin required so the VSA signer ref is @refs/tags/v0.3.1
+    uses: TomHennen/wrangle/.github/workflows/build_and_publish_go.yml@v0.4.0 # zizmor: ignore[unpinned-uses] release-tag pin required so the VSA signer ref is @refs/tags/v0.4.0
     with:
       path: go
       release-events: non-pull-request
