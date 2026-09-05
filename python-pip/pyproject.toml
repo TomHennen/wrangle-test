@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wrangle-test-fixture"
-version = "0.0.1"
+version = "0.0.1.dev33979418167"
 description = "Disposable test fixture for wrangle integration tests"
 requires-python = ">=3.12"
 
