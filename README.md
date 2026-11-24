@@ -83,4 +83,4 @@ See [TomHennen/wrangle#200](https://github.com/TomHennen/wrangle/issues/200).
 ## Maintenance
 
 Fixture dependencies are pinned and refreshed monthly via Dependabot.
-Dependabot PRs are auto-merged when CI passes.
+Dependabot PRs are folded into one reviewed batch PR by the weekly maintenance pass.
