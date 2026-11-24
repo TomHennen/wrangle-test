@@ -83,4 +83,4 @@ See [TomHennen/wrangle#200](https://github.com/TomHennen/wrangle/issues/200).
 ## Maintenance
 
 Fixture dependencies are pinned and refreshed monthly via Dependabot.
-Dependabot PRs are merged automatically once they open, after the 7-day cooldown. This repo has no PR CI; wrangle's next integration dispatch is what exercises a merged bump.
+Dependabot PRs are folded into one reviewed batch PR by the weekly maintenance pass.
